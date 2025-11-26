@@ -181,7 +181,7 @@ docker exec -it vllm_node bash
 
 All environment variables (NCCL, Ray, vLLM config) set by the startup script will be loaded automatically in this new session.
 
-## 5.\. Using cluster mode for inference
+## 5\. Using cluster mode for inference
 
 First, start follow the instructions above to start the head container on your first Spark, and node container on the second Spark.
 Then, on the first Spark, run vllm like this:
@@ -198,7 +198,7 @@ docker exec -it vllm_node
 
 And execute vllm command inside.
 
-## 5\. Benchmarking
+## 6\. Benchmarking
 
 Follow the guidance in [VLLM Benchmark Suites](https://docs.vllm.ai/en/latest/contributing/benchmarks/) to download benchmarking dataset, and then run a benchmark with a command like this (assuming you are running on head node, otherwise specify `--host` parameter):
 

@@ -3,14 +3,13 @@ FROM nvidia/cuda:13.0.2-cudnn-devel-ubuntu24.04
 # Set non-interactive frontend to prevent apt prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# CRITICAL: Allow pip to install globally on Ubuntu 24.04 without a venv
+# Allow pip to install globally on Ubuntu 24.04 without a venv
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 
 # Set the base directory environment variable
 ENV VLLM_BASE_DIR=/workspace/vllm
 
 # 1. Install System Dependencies
-# Added 'git', 'wget', and 'python3-pip' as they are required for the script steps
 RUN apt update && apt upgrade -y && apt install -y --allow-change-held-packages \
     curl \
     vim \
@@ -38,8 +37,6 @@ RUN mkdir -p tiktoken_encodings && \
     wget -O tiktoken_encodings/cl100k_base.tiktoken "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
 
 # 3. Set Environment Variables
-# Note: TORCH_CUDA_ARCH_LIST=12.1a is very specific (Hopper/H100 usually).
-# Ensure this matches your target hardware.
 ENV TORCH_CUDA_ARCH_LIST=12.1a
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
@@ -48,7 +45,7 @@ ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
 # Change this argument to force a re-download of PyTorch/FlashInfer
 ARG CACHEBUST_DEPS=1
 
-# 4. Install Python Dependencies (Using pip instead of uv)
+# 4. Install Python Dependencies 
 
 # Install PyTorch for CUDA 13.0
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
@@ -57,7 +54,6 @@ RUN pip install torch torchvision torchaudio --index-url https://download.pytorc
 RUN pip install xgrammar triton termplotlib
 
 # Install FlashInfer
-# Note: Using the same index URLs as provided in your script
 RUN pip install flashinfer-python --no-deps --index-url https://flashinfer.ai/whl && \
     pip install flashinfer-cubin --index-url https://flashinfer.ai/whl && \
     pip install flashinfer-jit-cache --index-url https://flashinfer.ai/whl/cu130 && \

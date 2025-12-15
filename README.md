@@ -12,6 +12,12 @@ The Dockerfile builds from the main branch of VLLM, so depending on when you run
 
 ## CHANGELOG
 
+### 2025-12-15
+
+Updated `build-and-copy.sh` flags:
+- Renamed `--triton-sha` to `--triton-ref` to support branches and tags in addition to commit SHAs.
+- Added `--vllm-ref <ref>`: Specify vLLM commit SHA, branch or tag (defaults to `main`).
+
 ### 2025-12-14
 
 Converted to multi-stage Docker build with improved build times and reduced final image size. The builder stage is now separate from the runtime stage, excluding unnecessary build tools from the final image.
@@ -45,35 +51,19 @@ Applied patch to enable FastSafeTensors in cluster configuration (EXPERIMENTAL) 
 
 ## 1\. Building the Docker Image
 
+### Building Manually
+
 The Dockerfile includes specific **Build Arguments** to allow you to selectively rebuild layers (e.g., update the vLLM source code without re-downloading PyTorch).
+Using a provided build script is recommended, but if you want to build using `docker build` command, here are the supported build arguments:
 
-### Option A: Standard Build (First Time)
+| Argument | Default | Description |
+| :--- | :--- | :--- |
+| `CACHEBUST_DEPS` | `1` | Change this to force a re-download of PyTorch, FlashInfer, and system dependencies. |
+| `CACHEBUST_VLLM` | `1` | Change this to force a fresh git clone and rebuild of vLLM source code. |
+| `TRITON_REF` | `v3.5.1` | Triton commit SHA, branch, or tag to build. |
+| `VLLM_REF` | `main` | vLLM commit SHA, branch, or tag to build. |
 
-```bash
-docker build -t vllm-node .
-```
-
-### Option B: Fast Rebuild (Update vLLM Source Only)
-
-Use this if you want to pull the latest code from GitHub but keep the heavy dependencies (Torch, FlashInfer, system deps) cached.
-
-```bash
-docker build \
-  --build-arg CACHEBUST_VLLM=$(date +%s) \
-  -t vllm-node .
-```
-
-### Option C: Full Rebuild (Update All Dependencies)
-
-Use this to force a re-download of PyTorch, FlashInfer, and system packages.
-
-```bash
-docker build \
-  --build-arg CACHEBUST_DEPS=$(date +%s) \
-  -t vllm-node .
-```
-
-### Option D: Using the Build Script (Recommended)
+### Using the Build Script (Recommended)
 
 The `build-and-copy.sh` script automates the build process and optionally copies the image to another node. This is the recommended method for building and deploying to multiple Spark nodes.
 
@@ -124,7 +114,7 @@ Using a different username:
 **Build with specific Triton commit:**
 
 ```bash
-./build-and-copy.sh --triton-sha abc123def456
+./build-and-copy.sh --triton-ref abc123def456
 ```
 
 **Copy existing image without rebuilding:**
@@ -140,7 +130,8 @@ Using a different username:
 | `-t, --tag <tag>` | Image tag (default: 'vllm-node') |
 | `--rebuild-deps` | Force rebuild all dependencies (sets CACHEBUST_DEPS) |
 | `--rebuild-vllm` | Force rebuild vLLM source only (sets CACHEBUST_VLLM) |
-| `--triton-sha <sha>` | Triton commit SHA (default: auto-detect latest main) |
+| `--triton-ref <ref>` | Triton commit SHA, branch or tag (default: 'v3.5.1') |
+| `--vllm-ref <ref>` | vLLM commit SHA, branch or tag (default: 'main') |
 | `-h, --copy-to-host <host>` | Host address to copy the image to after building |
 | `-u, --user <user>` | Username for SSH connection (default: current user) |
 | `--no-build` | Skip building, only copy existing image (requires `--copy-to-host`) |

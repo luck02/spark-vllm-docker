@@ -29,6 +29,8 @@ The Dockerfile builds from the main branch of VLLM, so depending on when you run
 
 Added `launch-cluster.sh` convenience script for basic cluster management - see details below.
 
+Added `-j` / `--build-jobs` argument to `build-and-copy.sh` to control build parallelism.
+
 ### 2025-12-15
 
 Updated `build-and-copy.sh` flags:
@@ -79,6 +81,7 @@ Using a provided build script is recommended, but if you want to build using `do
 | `CACHEBUST_VLLM` | `1` | Change this to force a fresh git clone and rebuild of vLLM source code. |
 | `TRITON_REF` | `v3.5.1` | Triton commit SHA, branch, or tag to build. |
 | `VLLM_REF` | `main` | vLLM commit SHA, branch, or tag to build. |
+| `BUILD_JOBS` | `16` | Number of parallel build jobs (default: 16). |
 
 ### Using the Build Script (Recommended)
 
@@ -149,6 +152,7 @@ Using a different username:
 | `--rebuild-vllm` | Force rebuild vLLM source only (sets CACHEBUST_VLLM) |
 | `--triton-ref <ref>` | Triton commit SHA, branch or tag (default: 'v3.5.1') |
 | `--vllm-ref <ref>` | vLLM commit SHA, branch or tag (default: 'main') |
+| `-j, --build-jobs <jobs>` | Number of parallel build jobs (default: Dockerfile default) |
 | `-h, --copy-to-host <host>` | Host address to copy the image to after building |
 | `-u, --user <user>` | Username for SSH connection (default: current user) |
 | `--no-build` | Skip building, only copy existing image (requires `--copy-to-host`) |

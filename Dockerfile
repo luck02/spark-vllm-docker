@@ -102,7 +102,7 @@ RUN git clone https://github.com/triton-lang/triton.git
 
 # We expect TRITON_REF to be passed from the command line to break the cache
 # Set to v3.5.1 tag by default
-ARG TRITON_REF=v3.5.1
+ARG TRITON_REF=v3.6.0
 
 WORKDIR $VLLM_BASE_DIR/triton
 

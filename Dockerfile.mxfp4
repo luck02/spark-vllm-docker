@@ -99,7 +99,7 @@ ARG FLASHINFER_SHA=f349e52496a72a00d8c4ac02c7a1e38523ff7194
 ARG CUTLASS_SHA=11af7f02ab52c9130e422eeb4b44042fbd60c083
 
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-     uv pip install nvidia-nvshmem-cu13
+     uv pip install nvidia-nvshmem-cu13 "apache-tvm-ffi<0.2"
 
 # Clone FlashInfer (cached for faster rebuilds)
 RUN --mount=type=cache,id=git-flashinfer,target=/git-cache/flashinfer \
@@ -144,18 +144,18 @@ WORKDIR /workspace/flashinfer
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=cache,id=ccache,target=/root/.ccache \
     sed -i -e 's/license = "Apache-2.0"/license = { text = "Apache-2.0" }/' -e '/license-files/d' pyproject.toml && \
-    uv pip install --no-build-isolation . -v
+    uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
 
 # flashinfer-cubin
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=cache,id=ccache,target=/root/.ccache \
-    cd flashinfer-cubin && uv pip install --no-build-isolation . -v
+    cd flashinfer-cubin && uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
 
 # flashinfer-jit-cache
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=cache,id=ccache,target=/root/.ccache \
     cd flashinfer-jit-cache && \
-    uv pip install --no-build-isolation . -v
+    uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
 
 # --- VLLM SOURCE CACHE BUSTER ---
 # Change THIS argument to force a fresh git clone and rebuild of vLLM
@@ -218,7 +218,7 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 # across totally separate `docker build` invocations.
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
     --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install --no-build-isolation . -v
+    uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
 
 # =========================================================
 # STAGE 4: Runner (Transfers only necessary artifacts)
@@ -256,8 +256,9 @@ RUN mkdir -p tiktoken_encodings && \
 # Copy artifacts from Builder Stage
 # We copy the python packages and executables
 # No need to copy source code, as it's already in the site-packages
-COPY --from=builder /usr/local/lib/python3.12/dist-packages /usr/local/lib/python3.12/dist-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /workspace/wheels /workspace/wheels
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+    uv pip install /workspace/wheels/*.whl
 
 # Setup Env for Runtime
 ENV TORCH_CUDA_ARCH_LIST="12.0;12.1"
@@ -272,4 +273,4 @@ RUN chmod +x $VLLM_BASE_DIR/run-cluster-node.sh
 
 # Final extra deps
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install ray[default]
+    uv pip install ray[default] fastsafetensors

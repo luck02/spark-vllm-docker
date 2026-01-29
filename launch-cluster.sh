@@ -35,6 +35,7 @@ usage() {
     echo "  --name          Container name (Optional, default: $DEFAULT_CONTAINER_NAME)"
     echo "  --eth-if        Ethernet interface (Optional, auto-detected)"
     echo "  --ib-if         InfiniBand interface (Optional, auto-detected)"
+    echo "  -e, --env       Environment variable to pass to container (e.g. -e VAR=val)"
     echo "  --nccl-debug    NCCL debug level (Optional, one of: VERSION, WARN, INFO, TRACE). If no level is provided, defaults to INFO."
     echo "  --apply-mod     Path to directory or zip file containing run.sh to apply before launch (Can be specified multiple times)"
     echo "  --check-config  Check configuration and auto-detection without launching"
@@ -52,6 +53,7 @@ while [[ "$#" -gt 0 ]]; do
         --name) CONTAINER_NAME="$2"; shift ;;
         --eth-if) ETH_IF="$2"; shift ;;
         --ib-if) IB_IF="$2"; shift ;;
+        -e|--env) DOCKER_ARGS="$DOCKER_ARGS -e $2"; shift ;;
         --apply-mod) MOD_PATHS+=("$2"); shift ;;
         --nccl-debug)
             if [[ -n "$2" && "$2" =~ ^(VERSION|WARN|INFO|TRACE)$ ]]; then

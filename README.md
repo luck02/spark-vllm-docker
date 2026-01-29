@@ -144,11 +144,13 @@ Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
 
-### 2026-01-26
+### 2026-01-29
+
+Added `-e` / `--env` parameter to `launch-cluster.sh` to pass environment variables to the container.
 
 Added an experimental build option, optimized for DGX Spark and gpt-oss models by [Christopher Owen](https://github.com/christopherowen/spark-vllm-mxfp4-docker/blob/main/Dockerfile).
 
-It is currently the fastest way to run GPT-OSS on DGX Spark, achieving 60 t/s on a single Spark. It's currently not working in a cluster configuration.
+It is currently the fastest way to run GPT-OSS on DGX Spark, achieving 60 t/s on a single Spark.
 
 To use this build, first build the container with `--exp-mxfp4` flag. I recommend using a separate label as it is currently not recommended to use this build for models other than gpt-oss:
 
@@ -183,7 +185,7 @@ Then, to run on a single Spark:
         --max-num-batched-tokens 8192"
 ```
 
-On a Dual Spark cluster (**CURRENTLY NOT WORKING**):
+On a Dual Spark cluster:
 
 ```bash
 ./launch-cluster.sh -t vllm-node-mxfp4 exec vllm serve \
@@ -521,7 +523,7 @@ The script attempts to automatically detect:
 You can override the auto-detected values if needed:
 
 ```bash
-./launch-cluster.sh --nodes "10.0.0.1,10.0.0.2" --eth-if enp1s0f1np1 --ib-if rocep1s0f1
+./launch-cluster.sh --nodes "10.0.0.1,10.0.0.2" --eth-if enp1s0f1np1 --ib-if rocep1s0f1 -e MY_ENV=123
 ```
 
 | Flag | Description |
@@ -531,6 +533,7 @@ You can override the auto-detected values if needed:
 | `--name` | Container name (default: `vllm_node`). |
 | `--eth-if` | Ethernet interface name. |
 | `--ib-if` | InfiniBand interface name. |
+| `-e, --env` | Environment variable to pass to container (e.g. `-e VAR=val`). Can be used multiple times. |
 | `--apply-mod` | Apply mods/patches from specified directory. Can be used multiple times to apply multiple mods. |
 | `--nccl-debug` | NCCL debug level (e.g., INFO, WARN). Defaults to INFO if flag is present but value is omitted. |
 | `--check-config` | Check configuration and auto-detection without launching. |

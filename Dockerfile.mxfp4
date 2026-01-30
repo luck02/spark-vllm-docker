@@ -258,7 +258,8 @@ RUN mkdir -p tiktoken_encodings && \
 # No need to copy source code, as it's already in the site-packages
 COPY --from=builder /workspace/wheels /workspace/wheels
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install /workspace/wheels/*.whl
+    uv pip install /workspace/wheels/*.whl && \
+    rm -rf /workspace/wheels
 
 # Setup Env for Runtime
 ENV TORCH_CUDA_ARCH_LIST="12.0;12.1"

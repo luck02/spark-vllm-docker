@@ -6,7 +6,7 @@ ARG BUILD_JOBS=16
 # =========================================================
 # STAGE 1: Base Image (Installs Dependencies)
 # =========================================================
-FROM nvidia/cuda:13.1.0-devel-ubuntu24.04 AS base
+FROM nvidia/cuda:13.1.1-devel-ubuntu24.04 AS base
 
 # Build parallemism
 ARG BUILD_JOBS
@@ -102,7 +102,7 @@ RUN git clone https://github.com/triton-lang/triton.git
 
 # We expect TRITON_REF to be passed from the command line to break the cache
 # Set to v3.5.1 tag by default
-ARG TRITON_REF=v3.6.0
+ARG TRITON_REF=v3.5.1
 
 WORKDIR $VLLM_BASE_DIR/triton
 
@@ -193,7 +193,7 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 # =========================================================
 # STAGE 4: Runner (Transfers only necessary artifacts)
 # =========================================================
-FROM nvidia/cuda:13.1.0-devel-ubuntu24.04 AS runner
+FROM nvidia/cuda:13.1.1-devel-ubuntu24.04 AS runner
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_BREAK_SYSTEM_PACKAGES=1

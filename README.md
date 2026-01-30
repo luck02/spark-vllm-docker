@@ -146,7 +146,63 @@ For periodic maintenance, I recommend using a filter: `docker builder prune --fi
 
 ### 2026-01-29
 
-Added `-e` / `--env` parameter to `launch-cluster.sh` to pass environment variables to the container.
+#### New Parameters for launch-cluster.sh
+
+- Added **solo mode** to `launch-cluster.sh` to launch models on a single node. Just use `--solo` flag  or if you have only a single Spark, it will default to Solo mode if no other nodes are found.
+- Added `-e` / `--env` parameter to `launch-cluster.sh` to pass environment variables to the container.
+
+#### New Mod for GLM-4.7-Flash-AWQ
+
+Added a mod to prevent severe inference speed degradation when using cyankiwi/GLM-4.7-Flash-AWQ-4bit (and potentially other AWQ quants of this model).
+See (this post on NVIDIA forums)[https://forums.developer.nvidia.com/t/make-glm-4-7-flash-go-brrrrr/359111] for implementation details.
+
+To use the mod, first build the container with Transformers 5 support (`--pre-tf`) flag, e.g.:
+
+```bash
+./build-and-copy.sh -t vllm-node-tf5 --use-wheels --pre-tf -c
+```
+
+Drop `--use-wheels` if you experience an error during build (see the annoucement in the Quick Start section).
+
+Then, to run on a single node:
+
+```bash
+./launch-cluster.sh -t vllm-node-tf5 --solo \
+  --apply-mod mods/fix-glm-4.7-flash-AWQ \
+  exec vllm serve cyankiwi/GLM-4.7-Flash-AWQ-4bit \
+  --tool-call-parser glm47 \
+  --reasoning-parser glm45 \
+  --enable-auto-tool-choice \
+  --served-model-name glm-4.7-flash \
+  --max-model-len 202752 \
+  --max-num-batched-tokens 4096 \
+  --max-num-seqs 64 \
+  --host 0.0.0.0 --port 8888 \
+  --gpu-memory-utilization 0.7
+```
+
+To run on cluster:
+
+```bash
+./launch-cluster.sh -t vllm-node-tf5 \
+  --apply-mod mods/fix-glm-4.7-flash-AWQ \
+  exec vllm serve cyankiwi/GLM-4.7-Flash-AWQ-4bit \
+  --tool-call-parser glm47 \
+  --reasoning-parser glm45 \
+  --enable-auto-tool-choice \
+  --served-model-name glm-4.7-flash \
+  --max-model-len 202752 \
+  --max-num-batched-tokens 4096 \
+  --max-num-seqs 64 \
+  --host 0.0.0.0 --port 8888 \
+  --gpu-memory-utilization 0.7 \
+  --distributed-executor-backend ray \
+  --tensor-parallel-size 2
+```
+
+**NOTE**: vLLM implementation is suboptimal even with the patch. The model performance is still significantly slower than it should be for the model with this number of active parameters. Running in the cluster increases prompt processing performance, but not token generation. You can expect ~40 t/s generation speed in both single node and cluster.
+
+#### Experimental Optimized MXFP4 Build
 
 Added an experimental build option, optimized for DGX Spark and gpt-oss models by [Christopher Owen](https://github.com/christopherowen/spark-vllm-mxfp4-docker/blob/main/Dockerfile).
 
@@ -537,6 +593,7 @@ You can override the auto-detected values if needed:
 | `--apply-mod` | Apply mods/patches from specified directory. Can be used multiple times to apply multiple mods. |
 | `--nccl-debug` | NCCL debug level (e.g., INFO, WARN). Defaults to INFO if flag is present but value is omitted. |
 | `--check-config` | Check configuration and auto-detection without launching. |
+| `--solo` | Solo mode: skip autodetection, launch only on current node, do not launch Ray cluster |
 | `-d` | Run in daemon mode (detached). |
 
 ## 3\. Running the Container (Manual)

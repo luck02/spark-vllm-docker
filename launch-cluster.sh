@@ -144,12 +144,8 @@ for i in "${!MOD_PATHS[@]}"; do
 done
 
 # --- Auto-Detection Logic ---
-
 # Source autodiscover module
 source "$(dirname "$0")/autodiscover.sh"
-
-# Perform auto-detection
-detect_interfaces || exit 1
 
 if [[ "$SOLO_MODE" == "true" ]]; then
     if [[ -n "$NODES_ARG" ]]; then
@@ -157,11 +153,13 @@ if [[ "$SOLO_MODE" == "true" ]]; then
         exit 1
     fi
     # Solo mode: skip node detection, just get local IP
-    detect_local_ip || exit 1
+    LOCAL_IP="127.0.0.1"
     NODES_ARG="$LOCAL_IP"
     PEER_NODES=()
     echo "Solo mode enabled. Skipping node detection."
 else
+    # Perform auto-detection
+    detect_interfaces || exit 1
     detect_nodes || exit 1
 fi
 
@@ -173,8 +171,11 @@ fi
 # Split nodes into array
 IFS=',' read -r -a ALL_NODES <<< "$NODES_ARG"
 
-# Detect Head IP (Local IP)
-detect_local_ip || exit 1
+if [[ "$SOLO_MODE" != "true" ]]; then
+    # Detect Head IP (Local IP)
+    detect_local_ip || exit 1
+fi
+
 HEAD_IP="$LOCAL_IP"
 
 # Verify HEAD_IP is in ALL_NODES

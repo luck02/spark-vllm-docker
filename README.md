@@ -144,6 +144,34 @@ Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
 
+### 2026-02-02
+
+Added a mod for nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B support. It supports all Nemotron Nano models/quants using the same reasoning parser.
+To use, add `--apply-mod mods/nemotron-nano` to `./launch-cluster.sh` arguments.
+
+For example, to run nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 on a single node:
+
+```bash
+./launch-cluster.sh --solo --apply-mod mods/nemotron-nano \
+  -e VLLM_USE_FLASHINFER_MOE_FP4=1 \
+  -e VLLM_FLASHINFER_MOE_BACKEND=throughput \
+  exec vllm serve nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 \
+    --max-num-seqs 8 \
+    --tensor-parallel-size 1 \
+    --max-model-len 262144 \
+    --port 8888 --host 0.0.0.0 \
+    --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser-plugin nano_v3_reasoning_parser.py \
+    --reasoning-parser nano_v3 \
+    --kv-cache-dtype fp8 \
+    --gpu-memory-utilization 0.7 \
+    --load-format fastsafetensors 
+```
+
+Please note, that NVFP4 models on Spark are not fully supported on vLLM (any build) yet, so the performance will not be optimal. You will likely see Flashinfer errors during load. This model is also known to crash sometimes.
+
 ### 2026-01-29
 
 #### New Parameters for launch-cluster.sh

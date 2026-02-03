@@ -98,3 +98,6 @@ RUN chmod +x $VLLM_BASE_DIR/run-cluster-node.sh
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install ray[default]
 
+# Remove opencv to prevent circular import issues with multiprocessing (vLLM #32668)
+RUN pip uninstall -y opencv-python opencv-python-headless 2>/dev/null || true
+

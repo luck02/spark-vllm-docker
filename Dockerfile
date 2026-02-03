@@ -31,6 +31,10 @@ ENV UV_LINK_MODE=copy
 # Set the base directory environment variable
 ENV VLLM_BASE_DIR=/workspace/vllm
 
+# Use faster ARM64 mirror (xtom has good global coverage)
+RUN sed -i 's|http://ports.ubuntu.com|http://mirrors.xtom.com/ubuntu-ports|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || \
+    sed -i 's|http://ports.ubuntu.com|http://mirrors.xtom.com/ubuntu-ports|g' /etc/apt/sources.list 2>/dev/null || true
+
 # 1. Install Build Dependencies & Ccache
 # Added ccache to enable incremental compilation caching
 RUN apt update && apt upgrade -y \
@@ -209,6 +213,10 @@ ENV UV_CACHE_DIR=/root/.cache/uv
 ENV UV_SYSTEM_PYTHON=1
 ENV UV_BREAK_SYSTEM_PACKAGES=1
 ENV UV_LINK_MODE=copy
+
+# Use faster ARM64 mirror (xtom has good global coverage)
+RUN sed -i 's|http://ports.ubuntu.com|http://mirrors.xtom.com/ubuntu-ports|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || \
+    sed -i 's|http://ports.ubuntu.com|http://mirrors.xtom.com/ubuntu-ports|g' /etc/apt/sources.list 2>/dev/null || true
 
 # Install minimal runtime dependencies (NCCL, Python)
 # Note: "devel" tools like cmake/gcc are NOT installed here to save space

@@ -27,17 +27,22 @@ CLUSTER_WAS_RUNNING="false"
 MOD_PATHS=()
 MOD_TYPES=()
 
+ACTIONS_ARG=""
+SOLO_MODE="false"
+
 # Function to print usage
 usage() {
-    echo "Usage: $0 [-n <node_ips>] [-t <image_name>] [--name <container_name>] [--eth-if <if_name>] [--ib-if <if_name>] [--nccl-debug <level>] [--check-config] [-d] [action] [command]"
+    echo "Usage: $0 [-n <node_ips>] [-t <image_name>] [--name <container_name>] [--eth-if <if_name>] [--ib-if <if_name>] [--nccl-debug <level>] [--check-config] [--solo] [-d] [action] [command]"
     echo "  -n, --nodes     Comma-separated list of node IPs (Optional, auto-detected if omitted)"
     echo "  -t              Docker image name (Optional, default: $IMAGE_NAME)"
     echo "  --name          Container name (Optional, default: $DEFAULT_CONTAINER_NAME)"
     echo "  --eth-if        Ethernet interface (Optional, auto-detected)"
     echo "  --ib-if         InfiniBand interface (Optional, auto-detected)"
+    echo "  -e, --env       Environment variable to pass to container (e.g. -e VAR=val)"
     echo "  --nccl-debug    NCCL debug level (Optional, one of: VERSION, WARN, INFO, TRACE). If no level is provided, defaults to INFO."
     echo "  --apply-mod     Path to directory or zip file containing run.sh to apply before launch (Can be specified multiple times)"
     echo "  --check-config  Check configuration and auto-detection without launching"
+    echo "  --solo          Solo mode: skip autodetection, launch only on current node, do not launch Ray cluster"
     echo "  -d              Daemon mode (only for 'start' action)"
     echo "  action          start | stop | status | exec (Default: start)"
     echo "  command         Command to run (only for 'exec' action)"
@@ -52,6 +57,7 @@ while [[ "$#" -gt 0 ]]; do
         --name) CONTAINER_NAME="$2"; shift ;;
         --eth-if) ETH_IF="$2"; shift ;;
         --ib-if) IB_IF="$2"; shift ;;
+        -e|--env) DOCKER_ARGS="$DOCKER_ARGS -e $2"; shift ;;
         --apply-mod) MOD_PATHS+=("$2"); shift ;;
         --nccl-debug)
             if [[ -n "$2" && "$2" =~ ^(VERSION|WARN|INFO|TRACE)$ ]]; then
@@ -62,6 +68,7 @@ while [[ "$#" -gt 0 ]]; do
             fi
             ;;
         --check-config) CHECK_CONFIG="true" ;;
+        --solo) SOLO_MODE="true" ;;
         -d) DAEMON_MODE="true" ;;
         -h|--help) usage ;;
         start|stop|status) 
@@ -137,13 +144,24 @@ for i in "${!MOD_PATHS[@]}"; do
 done
 
 # --- Auto-Detection Logic ---
-
 # Source autodiscover module
 source "$(dirname "$0")/autodiscover.sh"
 
-# Perform auto-detection
-detect_interfaces || exit 1
-detect_nodes || exit 1
+if [[ "$SOLO_MODE" == "true" ]]; then
+    if [[ -n "$NODES_ARG" ]]; then
+        echo "Error: --solo is incompatible with -n/--nodes."
+        exit 1
+    fi
+    # Solo mode: skip node detection, just get local IP
+    LOCAL_IP="127.0.0.1"
+    NODES_ARG="$LOCAL_IP"
+    PEER_NODES=()
+    echo "Solo mode enabled. Skipping node detection."
+else
+    # Perform auto-detection
+    detect_interfaces || exit 1
+    detect_nodes || exit 1
+fi
 
 if [[ -z "$NODES_ARG" ]]; then
     echo "Error: Nodes argument (-n) is mandatory or could not be auto-detected."
@@ -153,8 +171,11 @@ fi
 # Split nodes into array
 IFS=',' read -r -a ALL_NODES <<< "$NODES_ARG"
 
-# Detect Head IP (Local IP)
-detect_local_ip || exit 1
+if [[ "$SOLO_MODE" != "true" ]]; then
+    # Detect Head IP (Local IP)
+    detect_local_ip || exit 1
+fi
+
 HEAD_IP="$LOCAL_IP"
 
 # Verify HEAD_IP is in ALL_NODES
@@ -170,6 +191,12 @@ done
 if [ "$FOUND_HEAD" = false ]; then
     echo "Error: Local IP ($HEAD_IP) is not in the list of nodes ($NODES_ARG)."
     exit 1
+fi
+
+# Implicit Solo Mode Detection
+if [[ "$SOLO_MODE" == "false" && ${#PEER_NODES[@]} -eq 0 ]]; then
+    echo "Only local node detected/configured. Activating solo mode (no Ray cluster)."
+    SOLO_MODE="true"
 fi
 
 echo "Head Node: $HEAD_IP"
@@ -376,14 +403,15 @@ apply_mod_to_container() {
     # 3. Run run.sh
     echo "  Running patch script on $node_ip..."
 
-    local exec_cmd="cd $container_dest && chmod +x run.sh && ./run.sh"
+    local local_exec_cmd="export WORKSPACE_DIR=\$PWD && cd $container_dest && chmod +x run.sh && ./run.sh"
+    local remote_exec_cmd="export WORKSPACE_DIR=\\\$PWD && cd $container_dest && chmod +x run.sh && ./run.sh"
     local ret_code=0
 
     if [[ "$is_local" == "true" ]]; then
-        docker exec "$container" bash -c "$exec_cmd"
+        docker exec "$container" bash -c "$local_exec_cmd"
         ret_code=$?
     else
-        $cmd_prefix docker exec "$container" bash -c "\"$exec_cmd\""
+        $cmd_prefix docker exec "$container" bash -c "\"$remote_exec_cmd\""
         ret_code=$?
     fi
 
@@ -411,10 +439,18 @@ start_cluster() {
     echo "Starting Head Node on $HEAD_IP..."
     
     local head_cmd_args=()
-    if [[ ${#MOD_PATHS[@]} -gt 0 ]]; then
-        head_cmd_args=(bash -c "echo Waiting for mod application...; while [ ! -f /tmp/mod_done ]; do sleep 1; done; echo Mod applied, starting node...; exec ./run-cluster-node.sh --role head --host-ip $HEAD_IP --eth-if $ETH_IF --ib-if $IB_IF")
+    if [[ "$SOLO_MODE" == "true" ]]; then
+        if [[ ${#MOD_PATHS[@]} -gt 0 ]]; then
+             head_cmd_args=(bash -c "echo Waiting for mod application...; while [ ! -f /tmp/mod_done ]; do sleep 1; done; echo Mod applied, starting container...; exec sleep infinity")
+        else
+             head_cmd_args=(sleep infinity)
+        fi
     else
-        head_cmd_args=(./run-cluster-node.sh --role head --host-ip "$HEAD_IP" --eth-if "$ETH_IF" --ib-if "$IB_IF")
+        if [[ ${#MOD_PATHS[@]} -gt 0 ]]; then
+            head_cmd_args=(bash -c "echo Waiting for mod application...; while [ ! -f /tmp/mod_done ]; do sleep 1; done; echo Mod applied, starting node...; exec ./run-cluster-node.sh --role head --host-ip $HEAD_IP --eth-if $ETH_IF --ib-if $IB_IF")
+        else
+            head_cmd_args=(./run-cluster-node.sh --role head --host-ip "$HEAD_IP" --eth-if "$ETH_IF" --ib-if "$IB_IF")
+        fi
     fi
 
     docker run -d --privileged --gpus all --rm \
@@ -459,7 +495,13 @@ start_cluster() {
         done
     fi
 
-    wait_for_cluster
+    if [[ "$SOLO_MODE" == "false" ]]; then
+        wait_for_cluster
+    else
+        echo "Solo mode active: Skipping Ray cluster readiness check."
+        # Give container a moment to start up
+        sleep 2
+    fi
 }
 
 # Wait for Cluster Readiness

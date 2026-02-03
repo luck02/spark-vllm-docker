@@ -18,6 +18,9 @@ PARALLEL_COPY=false
 USE_WHEELS_MODE=""
 PRE_FLASHINFER=false
 PRE_TRANSFORMERS=false
+EXP_MXFP4=false
+TRITON_REF_SET=false
+VLLM_REF_SET=false
 
 cleanup() {
     if [ -n "$TMP_IMAGE" ] && [ -f "$TMP_IMAGE" ]; then
@@ -73,6 +76,7 @@ usage() {
     echo "  --use-wheels [mode]       : Use prebuilt vLLM wheels. Mode can be 'nightly' (default) or 'release'."
     echo "  --pre-flashinfer          : Use pre-release versions of FlashInfer"
     echo "  --pre-tf, --pre-transformers : Install transformers 5.0.0rc0 or higher"
+    echo "  --exp-mxfp4, --experimental-mxfp4 : Build with experimental native MXFP4 support"
     echo "  --no-build                : Skip building, only copy image (requires --copy-to)"
     echo "  -h, --help                : Show this help message"
     exit 1
@@ -84,8 +88,8 @@ while [[ "$#" -gt 0 ]]; do
         -t|--tag) IMAGE_TAG="$2"; shift ;;
         --rebuild-deps) REBUILD_DEPS=true ;;
         --rebuild-vllm) REBUILD_VLLM=true ;;
-        --triton-ref) TRITON_REF="$2"; shift ;;
-        --vllm-ref) VLLM_REF="$2"; shift ;;
+        --triton-ref) TRITON_REF="$2"; TRITON_REF_SET=true; shift ;;
+        --vllm-ref) VLLM_REF="$2"; VLLM_REF_SET=true; shift ;;
         -c|--copy-to|--copy-to-host|--copy-to-hosts)
             shift
             # Consume arguments until the next flag or end of args
@@ -135,12 +139,21 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --pre-flashinfer) PRE_FLASHINFER=true ;;
         --pre-tf|--pre-transformers) PRE_TRANSFORMERS=true ;;
+        --exp-mxfp4|--experimental-mxfp4) EXP_MXFP4=true ;;
         --no-build) NO_BUILD=true ;;
         -h|--help) usage ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
+
+if [ "$EXP_MXFP4" = true ]; then
+    if [ "$TRITON_REF_SET" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --triton-ref"; exit 1; fi
+    if [ "$VLLM_REF_SET" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --vllm-ref"; exit 1; fi
+    if [ -n "$USE_WHEELS_MODE" ]; then echo "Error: --exp-mxfp4 is incompatible with --use-wheels"; exit 1; fi
+    if [ "$PRE_FLASHINFER" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --pre-flashinfer"; exit 1; fi
+    if [ "$PRE_TRANSFORMERS" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --pre-transformers"; exit 1; fi
+fi
 
 # Validate --no-build usage
 if [ "$NO_BUILD" = true ] && [ "${#COPY_HOSTS[@]}" -eq 0 ]; then
@@ -154,7 +167,10 @@ if [ "$NO_BUILD" = false ]; then
     # Construct build command
     CMD=("docker" "build" "-t" "$IMAGE_TAG")
 
-    if [ -n "$USE_WHEELS_MODE" ]; then
+    if [ "$EXP_MXFP4" = true ]; then
+        echo "Building with experimental MXFP4 support..."
+        CMD+=("-f" "Dockerfile.mxfp4")
+    elif [ -n "$USE_WHEELS_MODE" ]; then
         echo "Using pre-built vLLM wheels (mode: $USE_WHEELS_MODE)"
         CMD+=("-f" "Dockerfile.wheels")
         if [ "$USE_WHEELS_MODE" = "release" ]; then

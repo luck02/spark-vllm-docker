@@ -159,6 +159,58 @@ Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
 
+### 2026-02-04
+
+#### Recipes support
+
+A major contribution from @raphaelamorim - model recipes. 
+Recipes allow to launch models with preconfigured settings with one command.
+
+Example:
+
+```bash
+# List available recipes
+./run-recipe.sh --list
+
+# Run a recipe in solo mode (single node)
+./run-recipe.sh glm-4.7-flash-awq --solo
+
+# Full setup: build container + download model + run
+./run-recipe.sh glm-4.7-flash-awq --solo --setup
+
+# Run with overrides
+./run-recipe.sh glm-4.7-flash-awq --solo --port 9000 --gpu-mem 0.8
+
+# Cluster deployment
+./run-recipe.sh glm-4.7-nvfp4 --setup
+```
+
+Please refer to the [documentation](recipes/README.md) for the details.
+
+#### Launch script option
+
+You can now specify a launch script to execute on head node instead of specifying a command directly via `exec` action. 
+Example: 
+
+```bash
+./launch-cluster.sh --launch-script examples/vllm-openai-gpt-oss-120b.sh
+```
+
+Thanks @raphaelamorim for the contribution!
+
+
+#### Ability to apply vLLM PRs during build
+
+`./build-and-copy.sh` now supports ability to apply vLLM PRs to builds. PR is applied to the most recent vLLM commit (or specific vllm-ref if set). This does NOT apply to wheels build and MXFP4 special build!
+
+To use, just specify `--apply-vllm-pr <pr_num>` in the arguments. Please note that it may fail depending on whether the PR needs a rebase for the specified vLLM reference/main branch. Use with caution!
+
+Example:
+
+```bash
+./build-and-copy.sh -t vllm-node-20260204-pr31740 --apply-vllm-pr 31740 -c
+```
+
 ### 2026-02-02
 
 #### Nemotron Nano mod
@@ -671,6 +723,7 @@ You can override the auto-detected values if needed:
 | `--nccl-debug` | NCCL debug level (e.g., INFO, WARN). Defaults to INFO if flag is present but value is omitted. |
 | `--check-config` | Check configuration and auto-detection without launching. |
 | `--solo` | Solo mode: skip autodetection, launch only on current node, do not launch Ray cluster |
+| `--launch-script` | Path to bash script to execute in the container (from examples/ directory or absolute path). If launch script is specified, action should be omitted. |
 | `-d` | Run in daemon mode (detached). |
 
 ## 3\. Running the Container (Manual)
@@ -887,13 +940,13 @@ vllm serve openai/gpt-oss-120b \
 
 ### Available Launch Scripts
 
-The `profiles/` directory contains ready-to-use launch scripts:
+The `examples/` directory contains ready-to-use launch scripts:
 
 - **example-vllm-minimax.sh** - MiniMax-M2-AWQ with Ray distributed backend
 - **vllm-openai-gpt-oss-120b.sh** - OpenAI GPT-OSS 120B with FlashInfer MOE
 - **vllm-glm-4.7-nvfp4.sh** - GLM-4.7-NVFP4 (requires the glm4_moe patch mod)
 
-See [profiles/README.md](profiles/README.md) for detailed documentation and more examples.
+See [examples/README.md](examples/README.md) for detailed documentation and more examples.
 
 ## 8\. Using cluster mode for inference
 

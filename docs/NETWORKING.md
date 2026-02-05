@@ -115,10 +115,21 @@ MTU setting (testing):
 sudo ip link set dev enp1s0f1np1 mtu 9000
 ```
 
-Benchmark connection (use perftest package):
+**Benchmark connection (use perftest package):**
+
+Run the receiver on `spark2` node:
+
+```bash
+ib_write_bw -d rocep1s0f1 --report_gbits -q 4 -R --force-link IB
+```
+
+Then run on `spark`:
+
+```bash
+$ ib_write_bw 192.168.177.12 -d rocep1s0f1 --report_gbits -q 4 -R --force-link IB
+```
 
 ```
-$ ib_write_bw 192.168.177.12 -d rocep1s0f1 --report_gbits -q 4 -R --force-link IB
 ---------------------------------------------------------------------------------------
                     RDMA_Write BW Test
  Dual-port       : OFF          Device         : rocep1s0f1
@@ -148,7 +159,15 @@ $ ib_write_bw 192.168.177.12 -d rocep1s0f1 --report_gbits -q 4 -R --force-link I
 ---------------------------------------------------------------------------------------
 ```
 
-Latency test:
+**Latency test:**
+
+Run the receiver on `spark2` node:
+
+```bash
+ib_write_lat -d rocep1s0f1 --report_gbits -R --force-link IB
+```
+
+Then run on `spark`:
 
 ```bash
 ib_write_lat 192.168.177.12 -d rocep1s0f1 --report_gbits -R --force-link IB

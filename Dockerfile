@@ -64,14 +64,14 @@ ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 FROM base AS builder
 
 
-# ======= Triton Build ========== 
+# # ======= Triton Build ========== 
 
 # # Initial Triton repo clone (cached forever)
 # RUN git clone https://github.com/triton-lang/triton.git
 
 # # We expect TRITON_REF to be passed from the command line to break the cache
-# # Set to v3.5.1 tag by default
-# ARG TRITON_REF=v3.5.1
+# # Set to v3.6.0 by default
+# ARG TRITON_REF=v3.6.0
 
 # WORKDIR $VLLM_BASE_DIR/triton
 
@@ -236,6 +236,14 @@ RUN --mount=type=cache,id=ccache,target=/root/.ccache \
 # =========================================================
 FROM nvcr.io/nvidia/pytorch:26.01-py3 AS runner
 
+# Transferring build settings from build image because of ptxas/jit compilation during vLLM startup
+# Build parallemism
+ARG BUILD_JOBS
+ENV MAX_JOBS=${BUILD_JOBS}
+ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS}
+ENV NINJAFLAGS="-j${BUILD_JOBS}"
+ENV MAKEFLAGS="-j${BUILD_JOBS}"
+
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 ENV VLLM_BASE_DIR=/workspace/vllm
@@ -253,7 +261,7 @@ RUN apt update && \
     curl vim git \
     libxcb1 \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install uv && pip uninstall -y flash-attn triton-kernels # pytorch-triton
+    && pip install uv && pip uninstall -y flash-attn # triton-kernels pytorch-triton
 
 # Set final working directory
 WORKDIR $VLLM_BASE_DIR

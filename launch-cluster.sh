@@ -31,6 +31,7 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
 ACTIONS_ARG=""
 SOLO_MODE="false"
+MOUNT_CACHE_DIRS="true"
 
 # Function to print usage
 usage() {
@@ -46,6 +47,7 @@ usage() {
     echo "  --launch-script Path to bash script to execute in the container (from examples/ directory or absolute path). If launch script is specified, action should be omitted."
     echo "  --check-config  Check configuration and auto-detection without launching"
     echo "  --solo          Solo mode: skip autodetection, launch only on current node, do not launch Ray cluster"
+    echo "  --no-cache-dirs Do not mount default cache directories (~/.cache/vllm, ~/.cache/flashinfer, ~/.triton)"
     echo "  -d              Daemon mode (only for 'start' action)"
     echo "  action          start | stop | status | exec (Default: start). Not compatible with --launch-script."
     echo "  command         Command to run (only for 'exec' action). Not compatible with --launch-script."
@@ -77,6 +79,7 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --check-config) CHECK_CONFIG="true" ;;
         --solo) SOLO_MODE="true" ;;
+        --no-cache-dirs) MOUNT_CACHE_DIRS="false" ;;
         -d) DAEMON_MODE="true" ;;
         -h|--help) usage ;;
         start|stop|status) 
@@ -125,6 +128,22 @@ if [[ -n "$NCCL_DEBUG_VAL" ]]; then
             exit 1
             ;;
     esac
+fi
+
+# Add cache dirs if requested
+CACHE_DIRS_TO_CREATE=()
+if [[ "$MOUNT_CACHE_DIRS" == "true" ]]; then
+    # vLLM Cache
+    DOCKER_ARGS="$DOCKER_ARGS -v $HOME/.cache/vllm:/root/.cache/vllm"
+    CACHE_DIRS_TO_CREATE+=("$HOME/.cache/vllm")
+    
+    # FlashInfer Cache
+    DOCKER_ARGS="$DOCKER_ARGS -v $HOME/.cache/flashinfer:/root/.cache/flashinfer"
+    CACHE_DIRS_TO_CREATE+=("$HOME/.cache/flashinfer")
+
+    # Triton Cache
+    DOCKER_ARGS="$DOCKER_ARGS -v $HOME/.triton:/root/.triton"
+    CACHE_DIRS_TO_CREATE+=("$HOME/.triton")
 fi
 
 # Resolve launch script path if specified
@@ -276,6 +295,12 @@ if [[ "$CHECK_CONFIG" == "true" ]]; then
     echo "  Image Name: $IMAGE_NAME"
     echo "  ETH Interface: $ETH_IF"
     echo "  IB Interface: $IB_IF"
+    echo "  Docker Args: $DOCKER_ARGS"
+    if [[ "$MOUNT_CACHE_DIRS" == "true" ]]; then
+         echo "  Mounting Cache Dirs: ${CACHE_DIRS_TO_CREATE[*]}"
+    else
+         echo "  Mounting Cache Dirs: (Disabled)"
+    fi
     exit 0
 fi
 
@@ -508,6 +533,13 @@ start_cluster() {
     # Start Head Node
     echo "Starting Head Node on $HEAD_IP..."
     
+    # Ensure cache dirs exist on head
+    if [[ "$MOUNT_CACHE_DIRS" == "true" ]]; then
+        for dir in "${CACHE_DIRS_TO_CREATE[@]}"; do
+            mkdir -p "$dir"
+        done
+    fi
+
     local head_cmd_args=()
     if [[ "$SOLO_MODE" == "true" ]]; then
         if [[ ${#MOD_PATHS[@]} -gt 0 ]]; then
@@ -534,6 +566,13 @@ start_cluster() {
     for worker in "${PEER_NODES[@]}"; do
         echo "Starting Worker Node on $worker..."
         
+        # Ensure cache dirs exist on worker
+        if [[ "$MOUNT_CACHE_DIRS" == "true" ]]; then
+             # Create string of dirs to create
+             dirs_str="${CACHE_DIRS_TO_CREATE[*]}"
+             ssh "$worker" "mkdir -p $dirs_str"
+        fi
+
         local docker_run_cmd="docker run -d --privileged --gpus all --rm --ipc=host --network host --name $CONTAINER_NAME $DOCKER_ARGS $IMAGE_NAME"
         
         if [[ ${#MOD_PATHS[@]} -gt 0 ]]; then

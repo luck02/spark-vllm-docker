@@ -67,7 +67,8 @@ ENV CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 WORKDIR $VLLM_BASE_DIR
 
 # 2. Set Environment Variables
-ENV TORCH_CUDA_ARCH_LIST="12.0;12.1"
+ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 
 # --- CACHE BUSTER ---
@@ -88,7 +89,8 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 # =========================================================
 FROM base AS builder
 
-ENV FLASHINFER_CUDA_ARCH_LIST="12.1f"
+ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
+ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 
 WORKDIR $VLLM_BASE_DIR
 
@@ -181,12 +183,11 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
     else \
         echo "Cache hit: Fetching updates..." && \
         cd vllm-mxfp4 && \
-        git fetch --all && \
-        git checkout ${VLLM_SHA} && \
-        if [ "${VLLM_SHA}" = "main" ]; then \
-            git reset --hard origin/main; \
-        fi && \
+        git fetch origin && \
+        git fetch origin --tags && \
+        (git checkout --detach origin/${VLLM_SHA} 2>/dev/null || git checkout ${VLLM_SHA}) && \
         git submodule update --init --recursive && \
+        git clean -fdx && \
         # Optimize git repo size
         git gc --auto; \
     fi && \
@@ -211,9 +212,9 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install -r requirements/build.txt
 
 # Apply Patches
-# TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/foundation-model-stack/fastsafetensors/issues/36
-#COPY fastsafetensors.patch .
-#RUN patch -p1 < fastsafetensors.patch
+# TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/vllm-project/vllm/issues/34180
+COPY fastsafetensors_mxfp4.patch .
+RUN patch -p1 < fastsafetensors_mxfp4.patch
 
 # Final Compilation
 # We mount the ccache directory here. Ideally, map this to a host volume for persistence 
@@ -260,9 +261,11 @@ RUN --mount=type=bind,from=builder,source=/workspace/wheels,target=/mount/wheels
     --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install /mount/wheels/*.whl
 
-# Setup Env for Runtime
-ENV TORCH_CUDA_ARCH_LIST="12.0;12.1"
-ENV FLASHINFER_CUDA_ARCH_LIST="12.1f"
+# Setup environment vars for runtime
+ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
+ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
 ENV PATH=$VLLM_BASE_DIR:$PATH
@@ -273,7 +276,7 @@ RUN chmod +x $VLLM_BASE_DIR/run-cluster-node.sh
 
 # Final extra deps
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install ray[default] fastsafetensors
+    uv pip install ray[default] fastsafetensors nvidia-nvshmem-cu13
 
 # If not compiling Triton
 # remove triton-kernels as they are not compatible with this vLLM version yet

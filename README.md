@@ -16,10 +16,11 @@ While it was primarily developed to support multi-node inference, it works just 
 - [4. Using `run-cluster-node.sh` (Internal)](#4-using-run-cluster-nodesh-internal)
 - [5. Configuration Details](#5-configuration-details)
 - [6. Mods and Patches](#6-mods-and-patches)
-- [7. Using cluster mode for inference](#7-using-cluster-mode-for-inference)
-- [8. Fastsafetensors](#8-fastsafetensors)
-- [9. Benchmarking](#9-benchmarking)
-- [10. Downloading Models](#10-downloading-models)
+- [7. Launch Scripts](#7-launch-scripts)
+- [8. Using cluster mode for inference](#8-using-cluster-mode-for-inference)
+- [9. Fastsafetensors](#9-fastsafetensors)
+- [10. Benchmarking](#10-benchmarking)
+- [11. Downloading Models](#11-downloading-models)
 
 ## DISCLAIMER
 
@@ -42,7 +43,10 @@ Build the container.
 
 **ATTENTION!** 
 
-If you are getting the following error (or similar), you need to build the image from the source instead of using pre-built wheels. To do it, just remove `--use-wheels` parameter from the build command:
+As of February 9th, 2026, wheels build is no longer recommended way to build the container due to a lack of optimizations present in the source build.
+If you still want to use wheels build, please see a note below:
+
+If you are getting the following error (or similar) when building from wheels, you need to build the image from the source instead of using pre-built wheels. To do it, just remove `--use-wheels` parameter from the build command:
 
 ```
 0.181 Using Python 3.12.3 environment at: /usr
@@ -60,22 +64,38 @@ This error happens if vLLM nightly build fails for aarch64 platform, but succeed
 **If you have only one DGX Spark:**
 
 ```bash
-./build-and-copy.sh --use-wheels
+./build-and-copy.sh
 ```
 
 **On DGX Spark cluster:**
 
 Make sure you connect your Sparks together and enable passwordless SSH as described in NVidia's [Connect Two Sparks Playbook](https://build.nvidia.com/spark/connect-two-sparks/stacked-sparks). 
+You can also check out our new [Networking Guide](docs/NETWORKING.md).
 
 Then run the following command that will build and distribute image across the cluster.
 
 ```bash
-./build-and-copy.sh --use-wheels -c
+./build-and-copy.sh -c
 ```
+
+An initial build will take around 30 minutes, but subsequent builds will be faster. You can also use precompiled wheels which significantly speed up the build, but source build is recommended because it uses components specifically compiled for DGX Spark.
 
 ### Run
 
 **On a single node**:
+
+**NEW** - `launch-cluster.sh` now supports solo mode, which is now a recommended way to run the container on a single Spark:
+
+```bash
+./launch-cluster.sh --solo exec \
+  vllm serve \
+    QuantTrio/Qwen3-VL-30B-A3B-Instruct-AWQ \
+    --port 8000 --host 0.0.0.0 \
+    --gpu-memory-utilization 0.7 \
+    --load-format fastsafetensors
+```
+
+**To launch using regular `docker run`**
 
 ```bash
  docker run \
@@ -143,6 +163,91 @@ docker builder prune
 Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
+
+### 2026-02-12
+
+Added a mod for Qwen3-Coder-Next-FP8 that fixes:
+
+- A bug with Triton allocator (https://github.com/vllm-project/vllm/issues/33857) that prevented the model to run in a cluster.
+- A bug that introduced crash when `--enable-prefix-caching` is on (https://github.com/vllm-project/vllm/issues/34361).
+- A bug that significantly impacted the performance on Spark (https://github.com/vllm-project/vllm/issues/34413).
+
+This mod was included in `qwen3-coder-next-fp8` recipe.
+
+### 2026-02-11
+
+#### Configurable GPU Architecture
+
+Added `--gpu-arch <arch>` flag to `build-and-copy.sh`. This allows specifying the target GPU architecture (e.g., `12.0f`) during the build process, instead of being hardcoded to `12.1a`. This argument controls both `TORCH_CUDA_ARCH_LIST` and `FLASHINFER_CUDA_ARCH_LIST` build arguments.
+
+### 2026-02-10
+
+#### Cache Directory Mounting
+
+`launch-cluster.sh` now automatically mounts default cache directories to the container to improve cold start times:
+- `~/.cache/vllm`
+- `~/.cache/flashinfer`
+- `~/.triton`
+
+To disable this behavior (clean start), use `--no-cache-dirs` flag.
+
+### 2026-02-09
+
+- Migrated to a new base image with PyTorch 2.10 compiled with Spark support. With this change, wheels build is no longer a recommended way - please use a source build instead.
+- Triton 3.6.0 is now default.
+- Removed temporary fastsafetensors patch, as proper fix is now merged into vLLM main branch.
+
+### 2026-02-04
+
+#### Recipes support
+
+A major contribution from @raphaelamorim - model recipes. 
+Recipes allow to launch models with preconfigured settings with one command.
+
+Example:
+
+```bash
+# List available recipes
+./run-recipe.sh --list
+
+# Run a recipe in solo mode (single node)
+./run-recipe.sh glm-4.7-flash-awq --solo
+
+# Full setup: build container + download model + run
+./run-recipe.sh glm-4.7-flash-awq --solo --setup
+
+# Run with overrides
+./run-recipe.sh glm-4.7-flash-awq --solo --port 9000 --gpu-mem 0.8
+
+# Cluster deployment
+./run-recipe.sh glm-4.7-nvfp4 --setup
+```
+
+Please refer to the [documentation](recipes/README.md) for the details.
+
+#### Launch script option
+
+You can now specify a launch script to execute on head node instead of specifying a command directly via `exec` action. 
+Example: 
+
+```bash
+./launch-cluster.sh --launch-script examples/vllm-openai-gpt-oss-120b.sh
+```
+
+Thanks @raphaelamorim for the contribution!
+
+
+#### Ability to apply vLLM PRs during build
+
+`./build-and-copy.sh` now supports ability to apply vLLM PRs to builds. PR is applied to the most recent vLLM commit (or specific vllm-ref if set). This does NOT apply to wheels build and MXFP4 special build!
+
+To use, just specify `--apply-vllm-pr <pr_num>` in the arguments. Please note that it may fail depending on whether the PR needs a rebase for the specified vLLM reference/main branch. Use with caution!
+
+Example:
+
+```bash
+./build-and-copy.sh -t vllm-node-20260204-pr31740 --apply-vllm-pr 31740 -c
+```
 
 ### 2026-02-02
 
@@ -221,10 +326,8 @@ See (this post on NVIDIA forums)[https://forums.developer.nvidia.com/t/make-glm-
 To use the mod, first build the container with Transformers 5 support (`--pre-tf`) flag, e.g.:
 
 ```bash
-./build-and-copy.sh -t vllm-node-tf5 --use-wheels --pre-tf -c
+./build-and-copy.sh -t vllm-node-tf5 --pre-tf -c
 ```
-
-Drop `--use-wheels` if you experience an error during build (see the annoucement in the Quick Start section).
 
 Then, to run on a single node:
 
@@ -438,8 +541,10 @@ Using a provided build script is recommended, but if you want to build using `do
 | :--- | :--- | :--- |
 | `CACHEBUST_DEPS` | `1` | Change this to force a re-download of PyTorch, FlashInfer, and system dependencies. |
 | `CACHEBUST_VLLM` | `1` | Change this to force a fresh git clone and rebuild of vLLM source code. |
-| `TRITON_REF` | `v3.5.1` | Triton commit SHA, branch, or tag to build. |
+| `TRITON_REF` | `v3.6.0` | Triton commit SHA, branch, or tag to build - currently ignored. |
 | `VLLM_REF` | `main` | vLLM commit SHA, branch, or tag to build. |
+| `TORCH_CUDA_ARCH_LIST` | `12.1a` | Target GPU architecture list for PyTorch. |
+| `FLASHINFER_CUDA_ARCH_LIST` | `12.1a` | Target GPU architecture list for FlashInfer. |
 | `BUILD_JOBS` | `16` | Number of parallel build jobs (default: 16). |
 | `FLASHINFER_PRE` | `""` | Set to `--pre` to use pre-release versions of FlashInfer. |
 | `PRE_TRANSFORMERS` | `0` | Set to `1` to install pre-release transformers (5.0.0rc or higher). |
@@ -461,6 +566,7 @@ Supported build arguments for `Dockerfile.wheels`:
 | `WHEELS_FROM_GITHUB_RELEASE` | `0` | Set to `1` to use GitHub release wheels instead of nightly wheels. |
 | `FLASHINFER_PRE` | `""` | Set to `--pre` to use pre-release versions of FlashInfer. |
 | `PRE_TRANSFORMERS` | `0` | Set to `1` to install pre-release transformers (5.0.0rc or higher). |
+| `TORCH_CUDA_ARCH_LIST` | `12.1a` | Target GPU architecture list. |
 
 ### Using the Build Script (Recommended)
 
@@ -535,6 +641,11 @@ Using a different username:
 ```bash
 ./build-and-copy.sh --triton-ref abc123def456
 ```
+**Build for specific GPU architecture:**
+
+```bash
+./build-and-copy.sh --gpu-arch 12.0f
+```
 
 **Copy existing image without rebuilding:**
 
@@ -546,6 +657,8 @@ Using a different username:
 
 | Flag | Description |
 | :--- | :--- |
+| `-t, --tag <tag>` | Image tag (default: 'vllm-node') |
+| `--gpu-arch <arch>` | Target GPU architecture (default: '12.1a') |
 | `-t, --tag <tag>` | Image tag (default: 'vllm-node') |
 | `--rebuild-deps` | Force rebuild all dependencies (sets CACHEBUST_DEPS) |
 | `--rebuild-vllm` | Force rebuild vLLM source only (sets CACHEBUST_VLLM) |
@@ -656,6 +769,8 @@ You can override the auto-detected values if needed:
 | `--nccl-debug` | NCCL debug level (e.g., INFO, WARN). Defaults to INFO if flag is present but value is omitted. |
 | `--check-config` | Check configuration and auto-detection without launching. |
 | `--solo` | Solo mode: skip autodetection, launch only on current node, do not launch Ray cluster |
+| `--no-cache-dirs` | Do not mount default cache directories (~/.cache/vllm, ~/.cache/flashinfer, ~/.triton). |
+| `--launch-script` | Path to bash script to execute in the container (from examples/ directory or absolute path). If launch script is specified, action should be omitted. |
 | `-d` | Run in daemon mode (detached). |
 
 ## 3\. Running the Container (Manual)
@@ -832,7 +947,55 @@ Mods can be used for:
 - Customizing vLLM behavior for specific workloads
 - Rapid iteration on development without rebuilding the entire image
 
-## 7\. Using cluster mode for inference
+## 7\. Launch Scripts
+
+Launch scripts provide a simple way to define reusable model configurations. Instead of passing long command lines, you can create a bash script that is copied into the container and executed directly.
+
+### Basic Usage
+
+```bash
+# Use a launch script by name (looks in profiles/ directory)
+./launch-cluster.sh --launch-script example-vllm-minimax
+
+# Use with explicit nodes
+./launch-cluster.sh -n 192.168.1.1,192.168.1.2 --launch-script vllm-openai-gpt-oss-120b.sh
+
+# Combine with mods for models requiring patches
+./launch-cluster.sh --launch-script vllm-glm-4.7-nvfp4.sh --apply-mod mods/fix-Salyut1-GLM-4.7-NVFP4
+```
+
+### Script Format
+
+Launch scripts are simple bash files that run directly inside the container:
+
+```bash
+#!/bin/bash
+# PROFILE: OpenAI GPT-OSS 120B
+# DESCRIPTION: vLLM serving openai/gpt-oss-120b with FlashInfer MOE optimization
+
+# Set environment variables if needed
+export VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=1
+
+# Run your command
+vllm serve openai/gpt-oss-120b \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --tensor-parallel-size 2 \
+    --distributed-executor-backend ray \
+    --enable-auto-tool-choice
+```
+
+### Available Launch Scripts
+
+The `examples/` directory contains ready-to-use launch scripts:
+
+- **example-vllm-minimax.sh** - MiniMax-M2-AWQ with Ray distributed backend
+- **vllm-openai-gpt-oss-120b.sh** - OpenAI GPT-OSS 120B with FlashInfer MOE
+- **vllm-glm-4.7-nvfp4.sh** - GLM-4.7-NVFP4 (requires the glm4_moe patch mod)
+
+See [examples/README.md](examples/README.md) for detailed documentation and more examples.
+
+## 8\. Using cluster mode for inference
 
 First, start follow the instructions above to start the head container on your first Spark, and node container on the second Spark.
 Then, on the first Spark, run vllm like this:
@@ -849,7 +1012,7 @@ docker exec -it vllm_node
 
 And execute vllm command inside.
 
-## 8\. Fastsafetensors
+## 9\. Fastsafetensors
 
 This build includes support for fastsafetensors loading which significantly improves loading speeds, especially on DGX Spark where MMAP performance is very poor currently.
 [Fasttensors](https://github.com/foundation-model-stack/fastsafetensors/) solve this issue by using more efficient multi-threaded loading while avoiding mmap.
@@ -863,11 +1026,11 @@ To use this method, simply include `--load-format fastsafetensors` when running 
 HF_HUB_OFFLINE=1 vllm serve openai/gpt-oss-120b --port 8888 --host 0.0.0.0 --trust_remote_code --swap-space 16 --gpu-memory-utilization 0.7 -tp 2 --distributed-executor-backend ray --load-format fastsafetensors
 ```
 
-## 9\. Benchmarking
+## 10\. Benchmarking
 
 I recommend using [llama-benchy](https://github.com/eugr/llama-benchy) - a new benchmarking tool that delivers results in the same format as llama-bench from llama.cpp suite.
 
-## 10\. Downloading Models
+## 11\. Downloading Models
 
 The `hf-download.sh` script provides a convenient way to download models from HuggingFace and distribute them across your cluster nodes. It uses Huggingface CLI via `uvx` for fast downloads and `rsync` for distribution across the cluster.
 
@@ -904,4 +1067,4 @@ The `hf-download.sh` script provides a convenient way to download models from Hu
 
 ### Hardware Architecture
 
-**Note:** The Dockerfile defaults to `TORCH_CUDA_ARCH_LIST=12.1a` (NVIDIA GB10). If you are using different hardware, update the `ENV` variable in the Dockerfile before building.
+**Note:** This project targets `12.1a` architecture (NVIDIA GB10 / DGX Spark). If you are using different hardware, you can use `--gpu-arch` flag in `./build-and-copy.sh`.

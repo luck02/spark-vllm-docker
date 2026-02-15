@@ -11,7 +11,7 @@ REBUILD_VLLM=false
 COPY_HOSTS=()
 SSH_USER="$USER"
 NO_BUILD=false
-TRITON_REF="v3.5.1"
+TRITON_REF="v3.6.0"
 VLLM_REF="main"
 TMP_IMAGE=""
 PARALLEL_COPY=false
@@ -21,6 +21,8 @@ PRE_TRANSFORMERS=false
 EXP_MXFP4=false
 TRITON_REF_SET=false
 VLLM_REF_SET=false
+VLLM_PRS=""
+FULL_LOG=false
 
 cleanup() {
     if [ -n "$TMP_IMAGE" ] && [ -f "$TMP_IMAGE" ]; then
@@ -59,11 +61,13 @@ copy_to_host() {
     fi
 }
 BUILD_JOBS="16"
+GPU_ARCH_LIST="12.1a"
 
 # Help function
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo "  -t, --tag <tag>           : Image tag (default: 'vllm-node')"
+    echo "  --gpu-arch <arch>         : GPU architecture (default: '12.1a')"
     echo "  --rebuild-deps            : Set cache bust for dependencies"
     echo "  --rebuild-vllm            : Set cache bust for vllm"
     echo "  --triton-ref <ref>        : Triton commit SHA, branch or tag (default: 'v3.5.1')"
@@ -77,6 +81,8 @@ usage() {
     echo "  --pre-flashinfer          : Use pre-release versions of FlashInfer"
     echo "  --pre-tf, --pre-transformers : Install transformers 5.0.0rc0 or higher"
     echo "  --exp-mxfp4, --experimental-mxfp4 : Build with experimental native MXFP4 support"
+    echo "  --apply-vllm-pr <pr-num>  : Apply a specific PR patch to vLLM source code. Can be specified multiple times."
+    echo "  --full-log                : Enable full build logging (--progress=plain)"
     echo "  --no-build                : Skip building, only copy image (requires --copy-to)"
     echo "  -h, --help                : Show this help message"
     exit 1
@@ -86,6 +92,7 @@ usage() {
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -t|--tag) IMAGE_TAG="$2"; shift ;;
+        --gpu-arch) GPU_ARCH_LIST="$2"; shift ;;
         --rebuild-deps) REBUILD_DEPS=true ;;
         --rebuild-vllm) REBUILD_VLLM=true ;;
         --triton-ref) TRITON_REF="$2"; TRITON_REF_SET=true; shift ;;
@@ -140,6 +147,20 @@ while [[ "$#" -gt 0 ]]; do
         --pre-flashinfer) PRE_FLASHINFER=true ;;
         --pre-tf|--pre-transformers) PRE_TRANSFORMERS=true ;;
         --exp-mxfp4|--experimental-mxfp4) EXP_MXFP4=true ;;
+        --apply-vllm-pr)
+            if [ -n "$2" ] && [[ "$2" != -* ]]; then
+               if [ -n "$VLLM_PRS" ]; then
+                   VLLM_PRS="$VLLM_PRS $2"
+               else
+                   VLLM_PRS="$2"
+               fi
+               shift
+            else
+               echo "Error: --apply-vllm-pr requires a PR number."
+               exit 1
+            fi
+            ;;
+        --full-log) FULL_LOG=true ;;
         --no-build) NO_BUILD=true ;;
         -h|--help) usage ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
@@ -147,12 +168,25 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+if [ -n "$VLLM_PRS" ]; then
+    if [ "$EXP_MXFP4" = true ]; then echo "Error: --apply-vllm-pr is incompatible with --exp-mxfp4"; exit 1; fi
+    if [ -n "$USE_WHEELS_MODE" ]; then echo "Error: --apply-vllm-pr is incompatible with --use-wheels"; exit 1; fi
+fi
+
 if [ "$EXP_MXFP4" = true ]; then
     if [ "$TRITON_REF_SET" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --triton-ref"; exit 1; fi
     if [ "$VLLM_REF_SET" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --vllm-ref"; exit 1; fi
     if [ -n "$USE_WHEELS_MODE" ]; then echo "Error: --exp-mxfp4 is incompatible with --use-wheels"; exit 1; fi
     if [ "$PRE_FLASHINFER" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --pre-flashinfer"; exit 1; fi
     if [ "$PRE_TRANSFORMERS" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --pre-transformers"; exit 1; fi
+fi
+
+if [ -n "$USE_WHEELS_MODE" ]; then
+    read -p "!!! Wheels build is known not to work properly with all models after migration to Torch 2.10! Full build is recommended. Do you want to continue (y/N)? " choice
+    case "$choice" in 
+        y|Y ) echo "Continuing...";;
+        * ) echo "Aborting."; exit 1;;
+    esac
 fi
 
 # Validate --no-build usage
@@ -166,6 +200,10 @@ BUILD_TIME=0
 if [ "$NO_BUILD" = false ]; then
     # Construct build command
     CMD=("docker" "build" "-t" "$IMAGE_TAG")
+
+    if [ "$FULL_LOG" = true ]; then
+        CMD+=("--progress=plain")
+    fi
 
     if [ "$EXP_MXFP4" = true ]; then
         echo "Building with experimental MXFP4 support..."
@@ -199,9 +237,18 @@ if [ "$NO_BUILD" = false ]; then
     # Add BUILD_JOBS to build arguments
     CMD+=("--build-arg" "BUILD_JOBS=$BUILD_JOBS")
 
+    # Add GPU architecture to build arguments
+    CMD+=("--build-arg" "TORCH_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
+    CMD+=("--build-arg" "FLASHINFER_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
+
     if [ "$PRE_FLASHINFER" = true ]; then
         echo "Using pre-release FlashInfer..."
         CMD+=("--build-arg" "FLASHINFER_PRE=--pre")
+    fi
+
+    if [ -n "$VLLM_PRS" ]; then
+        echo "Applying vLLM PRs: $VLLM_PRS"
+        CMD+=("--build-arg" "VLLM_PRS=$VLLM_PRS")
     fi
 
     if [ "$PRE_TRANSFORMERS" = true ]; then

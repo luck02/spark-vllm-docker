@@ -40,8 +40,8 @@ RUN mkdir -p tiktoken_encodings && \
     wget -O tiktoken_encodings/o200k_base.tiktoken "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken" && \
     wget -O tiktoken_encodings/cl100k_base.tiktoken "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
 
-# Cache TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/foundation-model-stack/fastsafetensors/issues/36
-COPY fastsafetensors.patch .
+# Cache TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/vllm-project/vllm/issues/34180
+# COPY fastsafetensors.patch .
 
 # Install fastsafetensors
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
@@ -66,9 +66,13 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
         --extra-index-url https://wheels.vllm.ai/nightly/cu130; \
     fi
 
-# Apply TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/foundation-model-stack/fastsafetensors/issues/36
+# Apply TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/vllm-project/vllm/issues/34180
 # Apply in site-packages
-RUN patch -p1 -d /usr/local/lib/python3.12/dist-packages < ${VLLM_BASE_DIR}/fastsafetensors.patch
+# RUN if patch -p1 --dry-run --reverse -d /usr/local/lib/python3.12/dist-packages < ${VLLM_BASE_DIR}/fastsafetensors.patch &>/dev/null; then \
+#         echo "PR #34180 is already applied"; \
+#     else \
+#         patch -p1 -d /usr/local/lib/python3.12/dist-packages < ${VLLM_BASE_DIR}/fastsafetensors.patch; \
+#     fi
 
 ARG FLASHINFER_PRE=""
 
@@ -86,7 +90,10 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     fi
 
 # Setup Env for Runtime
-ENV TORCH_CUDA_ARCH_LIST=12.1a
+ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
+ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
 

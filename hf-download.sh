@@ -154,26 +154,17 @@ else
 fi
 
 # Convert to the directory pattern used by HuggingFace
-# This is a heuristic - look for directories starting with the model name
 
 if [ -d "$HUB_PATH" ]; then
-    # Search for model directories matching the pattern
-    # Different quantizations of the same model will have different suffixes
-    # Try different patterns to find the downloaded model
     if [ -n "$ORG" ]; then
-        # Look for directories starting with "models--$ORG--$MODEL"
-        mapfile -t potential_dirs < <(find "$HUB_PATH" -maxdepth 1 -type d -name "models--${ORG}--${MODEL}*" 2>/dev/null)
+        MODEL_DIR="$HUB_PATH/models--${ORG}--${MODEL}"
     else
-        # Look for directories starting with the model name
-        mapfile -t potential_dirs < <(find "$HUB_PATH" -maxdepth 1 -type d -name "${MODEL}*" 2>/dev/null)
-    fi
-    
-    # If we found potential directories, use the most recently modified one
-    if [ ${#potential_dirs[@]} -gt 0 ]; then
-        # Sort by modification time, most recent first
-        IFS=$'\n' SORTED_DIRS=($(sort -r -k9,10 <<<"${potential_dirs[*]}"))
-        unset IFS
-        MODEL_DIR="${SORTED_DIRS[0]}"
+        # For models without org, check both patterns
+        if [ -d "$HUB_PATH/models--${MODEL}" ]; then
+            MODEL_DIR="$HUB_PATH/models--${MODEL}"
+        else
+            MODEL_DIR="$HUB_PATH/${MODEL}"
+        fi
     fi
 fi
 

@@ -98,7 +98,7 @@ ARG FLASHINFER_REPO=https://github.com/christopherowen/flashinfer.git
 ARG CUTLASS_REPO=https://github.com/christopherowen/cutlass.git
 
 ARG FLASHINFER_SHA=f349e52496a72a00d8c4ac02c7a1e38523ff7194
-ARG CUTLASS_SHA=7554e4a32b15929289aa80e8bc8a4e5f6f779407
+ARG CUTLASS_SHA=c7516ad20f3d022fdbc93e9468643bf3b577e02c
 
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
      uv pip install nvidia-nvshmem-cu13 "apache-tvm-ffi<0.2"

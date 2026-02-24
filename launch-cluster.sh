@@ -404,8 +404,8 @@ if [[ "$ACTION" == "status" ]]; then
 fi
 
 # Trap signals
-# Only trap if we are NOT in daemon mode, OR if we are in exec mode (always cleanup after exec)
-if [[ "$DAEMON_MODE" == "false" ]] || [[ "$ACTION" == "exec" ]]; then
+# Only trap if we are NOT in daemon mode (container should persist in daemon mode)
+if [[ "$DAEMON_MODE" == "false" ]]; then
     trap cleanup EXIT INT TERM HUP
 fi
 
@@ -697,15 +697,21 @@ wait_for_cluster() {
 if [[ "$ACTION" == "exec" ]]; then
     start_cluster
     echo "Executing command on head node: $COMMAND_TO_RUN"
-    
-    # Check if running in a TTY to avoid "input device is not a TTY" error
-    if [ -t 0 ]; then
-        DOCKER_EXEC_FLAGS="-it"
+
+    if [[ "$DAEMON_MODE" == "true" ]]; then
+        # Daemon mode: run command detached inside the container and exit immediately
+        docker exec -d "$CONTAINER_NAME" bash -c "$COMMAND_TO_RUN"
+        echo "Command dispatched in background (Daemon mode). Container: $CONTAINER_NAME"
     else
-        DOCKER_EXEC_FLAGS="-i"
+        # Check if running in a TTY to avoid "input device is not a TTY" error
+        if [ -t 0 ]; then
+            DOCKER_EXEC_FLAGS="-it"
+        else
+            DOCKER_EXEC_FLAGS="-i"
+        fi
+
+        docker exec $DOCKER_EXEC_FLAGS "$CONTAINER_NAME" bash -i -c "$COMMAND_TO_RUN"
     fi
-    
-    docker exec $DOCKER_EXEC_FLAGS "$CONTAINER_NAME" bash -i -c "$COMMAND_TO_RUN"
 elif [[ "$ACTION" == "start" ]]; then
     start_cluster
     if [[ "$DAEMON_MODE" == "true" ]]; then

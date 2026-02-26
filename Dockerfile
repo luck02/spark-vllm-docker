@@ -90,7 +90,7 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
         echo "Cache hit: Fetching flashinfer updates..." && \
         cd flashinfer && \
         git fetch origin && \
-        git fetch origin --tags && \
+        git fetch origin --tags --force && \
         (git checkout --detach origin/${FLASHINFER_REF} 2>/dev/null || git checkout ${FLASHINFER_REF}) && \
         git submodule update --init --recursive && \
         git clean -fdx && \
@@ -153,7 +153,7 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
         echo "Cache hit: Fetching updates..." && \
         cd vllm && \
         git fetch origin && \
-        git fetch origin --tags && \
+        git fetch origin --tags --force && \
         (git checkout --detach origin/${VLLM_REF} 2>/dev/null || git checkout ${VLLM_REF}) && \
         git submodule update --init --recursive && \
         git clean -fdx && \

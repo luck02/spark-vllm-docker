@@ -3,8 +3,9 @@
 # Default Configuration
 IMAGE_NAME="vllm-node"
 DEFAULT_CONTAINER_NAME="vllm_node"
+HF_CACHE_DIR="${HF_HOME:-$HOME/.cache/huggingface}"
 # Modify these if you want to pass additional docker args or set VLLM_SPARK_EXTRA_DOCKER_ARGS variable
-DOCKER_ARGS="-e NCCL_IGNORE_CPU_AFFINITY=1 -v $HOME/.cache/huggingface:/root/.cache/huggingface"
+DOCKER_ARGS="-e NCCL_IGNORE_CPU_AFFINITY=1 -v $HF_CACHE_DIR:/root/.cache/huggingface"
 
 # Append additional arguments from environment variable
 if [[ -n "$VLLM_SPARK_EXTRA_DOCKER_ARGS" ]]; then

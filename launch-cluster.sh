@@ -119,17 +119,8 @@ while [[ "$#" -gt 0 ]]; do
             break
             ;;
         *) 
-            # If it's not a flag and not a known action, treat as exec command for backward compatibility
-            # unless it's the default 'start' implied.
-            # However, to support "omitted" = start, we need to be careful.
-            # If the arg looks like a command, it's exec.
-            if [[ -n "$LAUNCH_SCRIPT_PATH" ]]; then
-                echo "Error: Command is not compatible with --launch-script. Please omit the command or not use --launch-script."
-                exit 1
-            fi
-            ACTION="exec"
-            COMMAND_TO_RUN="$@"
-            break 
+            echo "Error: Unknown argument or action: $1"
+            usage
             ;;
     esac
     shift
@@ -405,8 +396,8 @@ if [[ "$ACTION" == "status" ]]; then
 fi
 
 # Trap signals
-# Only trap if we are NOT in daemon mode, OR if we are in exec mode (always cleanup after exec)
-if [[ "$DAEMON_MODE" == "false" ]] || [[ "$ACTION" == "exec" ]]; then
+# Only trap if we are NOT in daemon mode (container should persist in daemon mode)
+if [[ "$DAEMON_MODE" == "false" ]]; then
     trap cleanup EXIT INT TERM HUP
 fi
 
@@ -698,15 +689,22 @@ wait_for_cluster() {
 if [[ "$ACTION" == "exec" ]]; then
     start_cluster
     echo "Executing command on head node: $COMMAND_TO_RUN"
-    
-    # Check if running in a TTY to avoid "input device is not a TTY" error
-    if [ -t 0 ]; then
-        DOCKER_EXEC_FLAGS="-it"
+
+    if [[ "$DAEMON_MODE" == "true" ]]; then
+        # Daemon mode: run command detached inside the container and exit immediately
+        # Extract env vars starting from VLLM_HOST_IP to avoid interactive check in .bashrc
+        docker exec -d "$CONTAINER_NAME" bash -c "eval \"\$(sed -n '/export VLLM_HOST_IP/,\$p' /root/.bashrc)\" && $COMMAND_TO_RUN"
+        echo "Command dispatched in background (Daemon mode). Container: $CONTAINER_NAME"
     else
-        DOCKER_EXEC_FLAGS="-i"
+        # Check if running in a TTY to avoid "input device is not a TTY" error
+        if [ -t 0 ]; then
+            DOCKER_EXEC_FLAGS="-it"
+        else
+            DOCKER_EXEC_FLAGS="-i"
+        fi
+
+        docker exec $DOCKER_EXEC_FLAGS "$CONTAINER_NAME" bash -i -c "$COMMAND_TO_RUN"
     fi
-    
-    docker exec $DOCKER_EXEC_FLAGS "$CONTAINER_NAME" bash -i -c "$COMMAND_TO_RUN"
 elif [[ "$ACTION" == "start" ]]; then
     start_cluster
     if [[ "$DAEMON_MODE" == "true" ]]; then

@@ -119,17 +119,8 @@ while [[ "$#" -gt 0 ]]; do
             break
             ;;
         *) 
-            # If it's not a flag and not a known action, treat as exec command for backward compatibility
-            # unless it's the default 'start' implied.
-            # However, to support "omitted" = start, we need to be careful.
-            # If the arg looks like a command, it's exec.
-            if [[ -n "$LAUNCH_SCRIPT_PATH" ]]; then
-                echo "Error: Command is not compatible with --launch-script. Please omit the command or not use --launch-script."
-                exit 1
-            fi
-            ACTION="exec"
-            COMMAND_TO_RUN="$@"
-            break 
+            echo "Error: Unknown argument or action: $1"
+            usage
             ;;
     esac
     shift
@@ -701,7 +692,8 @@ if [[ "$ACTION" == "exec" ]]; then
 
     if [[ "$DAEMON_MODE" == "true" ]]; then
         # Daemon mode: run command detached inside the container and exit immediately
-        docker exec -d "$CONTAINER_NAME" bash -c "$COMMAND_TO_RUN"
+        # Extract env vars starting from VLLM_HOST_IP to avoid interactive check in .bashrc
+        docker exec -d "$CONTAINER_NAME" bash -c "eval \"\$(sed -n '/export VLLM_HOST_IP/,\$p' /root/.bashrc)\" && $COMMAND_TO_RUN"
         echo "Command dispatched in background (Daemon mode). Container: $CONTAINER_NAME"
     else
         # Check if running in a TTY to avoid "input device is not a TTY" error

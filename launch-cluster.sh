@@ -693,7 +693,8 @@ if [[ "$ACTION" == "exec" ]]; then
     if [[ "$DAEMON_MODE" == "true" ]]; then
         # Daemon mode: run command detached inside the container and exit immediately
         # Extract env vars starting from VLLM_HOST_IP to avoid interactive check in .bashrc
-        docker exec -d "$CONTAINER_NAME" bash -c "eval \"\$(sed -n '/export VLLM_HOST_IP/,\$p' /root/.bashrc)\" && $COMMAND_TO_RUN"
+        # Redirect output to PID 1 stdout/stderr so it shows up in docker logs
+        docker exec -d "$CONTAINER_NAME" bash -c "eval \"\$(sed -n '/export VLLM_HOST_IP/,\$p' /root/.bashrc)\" && { $COMMAND_TO_RUN; } >> /proc/1/fd/1 2>> /proc/1/fd/2"
         echo "Command dispatched in background (Daemon mode). Container: $CONTAINER_NAME"
     else
         # Check if running in a TTY to avoid "input device is not a TTY" error

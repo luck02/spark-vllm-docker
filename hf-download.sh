@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-HUB_PATH="$HOME/.cache/huggingface/hub"
+HUB_PATH="${HF_HOME:-$HOME/.cache/huggingface}/hub"
 
 # Default values
 COPY_HOSTS=()
@@ -42,7 +42,7 @@ copy_model_to_host() {
     local host_copy_start host_copy_end host_copy_time
     host_copy_start=$(date +%s)
     
-    if rsync -av --progress "$model_dir" "${SSH_USER}@${host}:$HUB_PATH/"; then
+    if rsync -av --mkpath --progress "$model_dir" "${SSH_USER}@${host}:$HUB_PATH/"; then
         host_copy_end=$(date +%s)
         host_copy_time=$((host_copy_end - host_copy_start))
         printf "Copy to %s completed in %02d:%02d:%02d\n" "$host" $((host_copy_time/3600)) $((host_copy_time%3600/60)) $((host_copy_time%60))

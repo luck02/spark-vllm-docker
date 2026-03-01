@@ -6,23 +6,25 @@ START_TIME=$(date +%s)
 
 # Default values
 IMAGE_TAG="vllm-node"
-REBUILD_DEPS=false
+REBUILD_FLASHINFER=false
 REBUILD_VLLM=false
 COPY_HOSTS=()
 SSH_USER="$USER"
 NO_BUILD=false
-TRITON_REF="v3.6.0"
 VLLM_REF="main"
 TMP_IMAGE=""
 PARALLEL_COPY=false
-USE_WHEELS_MODE=""
-PRE_FLASHINFER=false
-PRE_TRANSFORMERS=false
 EXP_MXFP4=false
-TRITON_REF_SET=false
 VLLM_REF_SET=false
 VLLM_PRS=""
+PRE_TRANSFORMERS=false
 FULL_LOG=false
+BUILD_JOBS="16"
+GPU_ARCH_LIST="12.1a"
+WHEELS_REPO="eugr/spark-vllm-docker"
+FLASHINFER_RELEASE_TAG="prebuilt-flashinfer-current"
+# Space-separated list of GPU architectures for which prebuilt wheels are available
+PREBUILT_WHEELS_SUPPORTED_ARCHS="12.1a"
 
 cleanup() {
     if [ -n "$TMP_IMAGE" ] && [ -f "$TMP_IMAGE" ]; then
@@ -60,31 +62,111 @@ copy_to_host() {
         return 1
     fi
 }
-BUILD_JOBS="16"
-GPU_ARCH_LIST="12.1a"
+
+# try_download_wheels TAG PREFIX
+# Downloads wheels matching PREFIX*.whl from a GitHub release.
+# Skips files that are already present and up to date (by remote updated_at vs local mtime).
+# Returns 0 if all matching wheels are now available, 1 on any error.
+try_download_wheels() {
+    local TAG="$1"
+    local PREFIX="$2"
+    local WHEELS_DIR="./wheels"
+
+    local arch
+    for arch in $PREBUILT_WHEELS_SUPPORTED_ARCHS; do
+        [ "$arch" = "$GPU_ARCH_LIST" ] && break
+        arch=""
+    done
+    if [ -z "$arch" ]; then
+        echo "GPU arch '$GPU_ARCH_LIST' not supported by prebuilt wheels (supported: $PREBUILT_WHEELS_SUPPORTED_ARCHS) — skipping download."
+        return 1
+    fi
+
+    local RELEASE_JSON
+    RELEASE_JSON=$(curl -sf --connect-timeout 10 \
+        "https://api.github.com/repos/$WHEELS_REPO/releases/tags/$TAG") || {
+        echo "Could not fetch release metadata for '$TAG' — skipping download."
+        return 1
+    }
+
+    local DOWNLOAD_LIST
+    DOWNLOAD_LIST=$(echo "$RELEASE_JSON" | python3 -c '
+import json, sys, os
+from datetime import datetime, timezone
+
+wheels_dir, prefix = sys.argv[1], sys.argv[2]
+data = json.load(sys.stdin)
+assets = [a for a in data.get("assets", [])
+          if a["name"].startswith(prefix) and a["name"].endswith(".whl")]
+
+if not assets:
+    print("No assets found matching prefix: " + prefix, file=sys.stderr)
+    sys.exit(1)
+
+for a in assets:
+    local_path = os.path.join(wheels_dir, a["name"])
+    remote_ts = datetime.strptime(a["updated_at"], "%Y-%m-%dT%H:%M:%SZ") \
+                    .replace(tzinfo=timezone.utc).timestamp()
+    if not os.path.exists(local_path) or remote_ts > os.path.getmtime(local_path):
+        print(a["browser_download_url"] + " " + a["name"])
+' "$WHEELS_DIR" "$PREFIX") || return 1
+
+    if [ -z "$DOWNLOAD_LIST" ]; then
+        echo "All $PREFIX wheels are up to date — skipping download."
+        return 0
+    fi
+
+    # Back up existing wheels so we never leave a mix of old and new on failure
+    local DL_BACKUP="$WHEELS_DIR/.backup-download-${PREFIX}"
+    rm -rf "$DL_BACKUP" && mkdir -p "$DL_BACKUP"
+    for f in "$WHEELS_DIR/${PREFIX}"*.whl; do
+        [ -f "$f" ] && mv "$f" "$DL_BACKUP/"
+    done
+
+    local URL NAME TMP_WHL
+    local DOWNLOADED=()
+    while IFS=' ' read -r URL NAME; do
+        echo "Downloading $NAME..."
+        TMP_WHL=$(mktemp "$WHEELS_DIR/${NAME}.XXXXXX")
+        if curl -L --progress-bar --connect-timeout 30 "$URL" -o "$TMP_WHL"; then
+            mv "$TMP_WHL" "$WHEELS_DIR/$NAME"
+            DOWNLOADED+=("$WHEELS_DIR/$NAME")
+        else
+            rm -f "$TMP_WHL"
+            echo "Failed to download $NAME — removing other downloaded files."
+            for f in "${DOWNLOADED[@]}"; do rm -f "$f"; done
+            if compgen -G "$DL_BACKUP/${PREFIX}*.whl" > /dev/null 2>&1; then
+                echo "Restoring previous $PREFIX wheels..."
+                mv "$DL_BACKUP/${PREFIX}"*.whl "$WHEELS_DIR/"
+            fi
+            rm -rf "$DL_BACKUP"
+            return 1
+        fi
+    done <<< "$DOWNLOAD_LIST"
+
+    rm -rf "$DL_BACKUP"
+    return 0
+}
 
 # Help function
 usage() {
     echo "Usage: $0 [OPTIONS]"
-    echo "  -t, --tag <tag>           : Image tag (default: 'vllm-node')"
-    echo "  --gpu-arch <arch>         : GPU architecture (default: '12.1a')"
-    echo "  --rebuild-deps            : Set cache bust for dependencies"
-    echo "  --rebuild-vllm            : Set cache bust for vllm"
-    echo "  --triton-ref <ref>        : Triton commit SHA, branch or tag (default: 'v3.5.1')"
-    echo "  --vllm-ref <ref>          : vLLM commit SHA, branch or tag (default: 'main')"
-    echo "  -c, --copy-to <hosts>     : Host(s) to copy the image to. Accepts comma or space-delimited lists after the flag."
-    echo "      --copy-to-host        : Alias for --copy-to (backwards compatibility)."
-    echo "      --copy-parallel       : Copy to all hosts in parallel instead of serially."
-    echo "  -j, --build-jobs <jobs>   : Number of concurrent build jobs (default: \${BUILD_JOBS})"
-    echo "  -u, --user <user>         : Username for ssh command (default: \$USER)"
-    echo "  --use-wheels [mode]       : Use prebuilt vLLM wheels. Mode can be 'nightly' (default) or 'release'."
-    echo "  --pre-flashinfer          : Use pre-release versions of FlashInfer"
-    echo "  --pre-tf, --pre-transformers : Install transformers 5.0.0rc0 or higher"
+    echo "  -t, --tag <tag>               : Image tag (default: 'vllm-node')"
+    echo "  --gpu-arch <arch>             : GPU architecture (default: '12.1a')"
+    echo "  --rebuild-flashinfer          : Force rebuild of FlashInfer wheels (ignore cached wheels)"
+    echo "  --rebuild-vllm                : Force rebuild of vLLM wheels (ignore cached wheels)"
+    echo "  --vllm-ref <ref>              : vLLM commit SHA, branch or tag (default: 'main')"
+    echo "  -c, --copy-to <hosts>         : Host(s) to copy the image to. Accepts comma or space-delimited lists."
+    echo "      --copy-to-host            : Alias for --copy-to (backwards compatibility)."
+    echo "      --copy-parallel           : Copy to all hosts in parallel instead of serially."
+    echo "  -j, --build-jobs <jobs>       : Number of concurrent build jobs (default: ${BUILD_JOBS})"
+    echo "  -u, --user <user>             : Username for ssh command (default: \$USER)"
+    echo "  --tf5                         : Install transformers>=5 (aliases: --pre-tf, --pre-transformers)"
     echo "  --exp-mxfp4, --experimental-mxfp4 : Build with experimental native MXFP4 support"
-    echo "  --apply-vllm-pr <pr-num>  : Apply a specific PR patch to vLLM source code. Can be specified multiple times."
-    echo "  --full-log                : Enable full build logging (--progress=plain)"
-    echo "  --no-build                : Skip building, only copy image (requires --copy-to)"
-    echo "  -h, --help                : Show this help message"
+    echo "  --apply-vllm-pr <pr-num>      : Apply a specific PR patch to vLLM source. Can be specified multiple times."
+    echo "  --full-log                    : Enable full build logging (--progress=plain)"
+    echo "  --no-build                    : Skip building, only copy image (requires --copy-to)"
+    echo "  -h, --help                    : Show this help message"
     exit 1
 }
 
@@ -93,34 +175,30 @@ while [[ "$#" -gt 0 ]]; do
     case $1 in
         -t|--tag) IMAGE_TAG="$2"; shift ;;
         --gpu-arch) GPU_ARCH_LIST="$2"; shift ;;
-        --rebuild-deps) REBUILD_DEPS=true ;;
+        --rebuild-flashinfer) REBUILD_FLASHINFER=true ;;
         --rebuild-vllm) REBUILD_VLLM=true ;;
-        --triton-ref) TRITON_REF="$2"; TRITON_REF_SET=true; shift ;;
         --vllm-ref) VLLM_REF="$2"; VLLM_REF_SET=true; shift ;;
         -c|--copy-to|--copy-to-host|--copy-to-hosts)
             shift
-            # Consume arguments until the next flag or end of args
             while [[ "$#" -gt 0 && "$1" != -* ]]; do
                 add_copy_hosts "$1"
                 shift
             done
 
-            # If no hosts specified, use autodiscovery
             if [ "${#COPY_HOSTS[@]}" -eq 0 ]; then
                 echo "No hosts specified. Using autodiscovery..."
                 source "$(dirname "$0")/autodiscover.sh"
-                
+
                 detect_nodes
                 if [ $? -ne 0 ]; then
                     echo "Error: Autodiscovery failed."
                     exit 1
                 fi
-                
-                # Use PEER_NODES directly
+
                 if [ ${#PEER_NODES[@]} -gt 0 ]; then
                     COPY_HOSTS=("${PEER_NODES[@]}")
                 fi
-                
+
                 if [ "${#COPY_HOSTS[@]}" -eq 0 ]; then
                      echo "Error: Autodiscovery found no other nodes."
                      exit 1
@@ -132,20 +210,7 @@ while [[ "$#" -gt 0 ]]; do
         -j|--build-jobs) BUILD_JOBS="$2"; shift ;;
         -u|--user) SSH_USER="$2"; shift ;;
         --copy-parallel) PARALLEL_COPY=true ;;
-        --use-wheels)
-            if [[ "$2" != -* && -n "$2" ]]; then
-                if [[ "$2" != "nightly" && "$2" != "release" ]]; then
-                    echo "Error: --use-wheels argument must be 'nightly' or 'release'."
-                    exit 1
-                fi
-                USE_WHEELS_MODE="$2"
-                shift
-            else
-                USE_WHEELS_MODE="nightly"
-            fi
-            ;;
-        --pre-flashinfer) PRE_FLASHINFER=true ;;
-        --pre-tf|--pre-transformers) PRE_TRANSFORMERS=true ;;
+        --tf5|--pre-tf|--pre-transformers) PRE_TRANSFORMERS=true ;;
         --exp-mxfp4|--experimental-mxfp4) EXP_MXFP4=true ;;
         --apply-vllm-pr)
             if [ -n "$2" ] && [[ "$2" != -* ]]; then
@@ -168,25 +233,16 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+# Validate flag combinations
 if [ -n "$VLLM_PRS" ]; then
     if [ "$EXP_MXFP4" = true ]; then echo "Error: --apply-vllm-pr is incompatible with --exp-mxfp4"; exit 1; fi
-    if [ -n "$USE_WHEELS_MODE" ]; then echo "Error: --apply-vllm-pr is incompatible with --use-wheels"; exit 1; fi
 fi
 
 if [ "$EXP_MXFP4" = true ]; then
-    if [ "$TRITON_REF_SET" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --triton-ref"; exit 1; fi
     if [ "$VLLM_REF_SET" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --vllm-ref"; exit 1; fi
-    if [ -n "$USE_WHEELS_MODE" ]; then echo "Error: --exp-mxfp4 is incompatible with --use-wheels"; exit 1; fi
-    if [ "$PRE_FLASHINFER" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --pre-flashinfer"; exit 1; fi
-    if [ "$PRE_TRANSFORMERS" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --pre-transformers"; exit 1; fi
-fi
-
-if [ -n "$USE_WHEELS_MODE" ]; then
-    read -p "!!! Wheels build is known not to work properly with all models after migration to Torch 2.10! Full build is recommended. Do you want to continue (y/N)? " choice
-    case "$choice" in 
-        y|Y ) echo "Continuing...";;
-        * ) echo "Aborting."; exit 1;;
-    esac
+    if [ "$PRE_TRANSFORMERS" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --tf5"; exit 1; fi
+    if [ "$REBUILD_FLASHINFER" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --rebuild-flashinfer"; exit 1; fi
+    if [ "$REBUILD_VLLM" = true ]; then echo "Error: --exp-mxfp4 is incompatible with --rebuild-vllm"; exit 1; fi
 fi
 
 # Validate --no-build usage
@@ -195,81 +251,184 @@ if [ "$NO_BUILD" = true ] && [ "${#COPY_HOSTS[@]}" -eq 0 ]; then
     exit 1
 fi
 
-# Build image (unless --no-build is set)
-BUILD_TIME=0
+# Ensure wheels directory exists
+mkdir -p ./wheels
+
+# Common build flags used across all non-mxfp4 sub-builds
+COMMON_BUILD_FLAGS=()
+if [ "$FULL_LOG" = true ]; then
+    COMMON_BUILD_FLAGS+=("--progress=plain")
+fi
+COMMON_BUILD_FLAGS+=("--build-arg" "BUILD_JOBS=$BUILD_JOBS")
+COMMON_BUILD_FLAGS+=("--build-arg" "TORCH_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
+COMMON_BUILD_FLAGS+=("--build-arg" "FLASHINFER_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
+
+# =====================================================
+# Build image (unless --no-build or --exp-mxfp4)
+# =====================================================
+FLASHINFER_BUILD_TIME=0
+VLLM_BUILD_TIME=0
+RUNNER_BUILD_TIME=0
+
 if [ "$NO_BUILD" = false ]; then
-    # Construct build command
-    CMD=("docker" "build" "-t" "$IMAGE_TAG")
-
-    if [ "$FULL_LOG" = true ]; then
-        CMD+=("--progress=plain")
-    fi
-
     if [ "$EXP_MXFP4" = true ]; then
         echo "Building with experimental MXFP4 support..."
-        CMD+=("-f" "Dockerfile.mxfp4")
-    elif [ -n "$USE_WHEELS_MODE" ]; then
-        echo "Using pre-built vLLM wheels (mode: $USE_WHEELS_MODE)"
-        CMD+=("-f" "Dockerfile.wheels")
-        if [ "$USE_WHEELS_MODE" = "release" ]; then
-             CMD+=("--build-arg" "WHEELS_FROM_GITHUB_RELEASE=1")
-        fi
+        CMD=("docker" "build" "-t" "$IMAGE_TAG" "${COMMON_BUILD_FLAGS[@]}" "-f" "Dockerfile.mxfp4" ".")
+        echo "Building image with command: ${CMD[*]}"
+        BUILD_START=$(date +%s)
+        "${CMD[@]}"
+        BUILD_END=$(date +%s)
+        RUNNER_BUILD_TIME=$((BUILD_END - BUILD_START))
     else
-        echo "Building vLLM from source"
+        # ----------------------------------------------------------
+        # Phase 1: FlashInfer wheels
+        # ----------------------------------------------------------
+        BUILD_FLASHINFER=false
+        if [ "$REBUILD_FLASHINFER" = true ]; then
+            echo "Rebuilding FlashInfer wheels (--rebuild-flashinfer specified)..."
+            BUILD_FLASHINFER=true
+        elif try_download_wheels "$FLASHINFER_RELEASE_TAG" "flashinfer"; then
+            echo "FlashInfer wheels ready."
+        elif compgen -G "./wheels/flashinfer*.whl" > /dev/null 2>&1; then
+            echo "Download failed — using existing local FlashInfer wheels."
+        else
+            echo "No FlashInfer wheels available (download failed) — building..."
+            BUILD_FLASHINFER=true
+        fi
+
+        if [ "$BUILD_FLASHINFER" = true ]; then
+            # Back up existing flashinfer wheels; restore them if the build fails
+            FI_BACKUP="./wheels/.backup-flashinfer"
+            rm -rf "$FI_BACKUP" && mkdir -p "$FI_BACKUP"
+            for f in ./wheels/flashinfer*.whl; do
+                [ -f "$f" ] && mv "$f" "$FI_BACKUP/"
+            done
+
+            FI_CMD=("docker" "build"
+                "--target" "flashinfer-export"
+                "--output" "type=local,dest=./wheels"
+                "${COMMON_BUILD_FLAGS[@]}")
+
+            if [ "$REBUILD_FLASHINFER" = true ]; then
+                FI_CMD+=("--build-arg" "CACHEBUST_FLASHINFER=$(date +%s)")
+            fi
+
+            FI_CMD+=(".")
+
+            echo "FlashInfer build command: ${FI_CMD[*]}"
+            FI_START=$(date +%s)
+            if "${FI_CMD[@]}"; then
+                FI_END=$(date +%s)
+                FLASHINFER_BUILD_TIME=$((FI_END - FI_START))
+                rm -rf "$FI_BACKUP"
+            else
+                echo "FlashInfer build failed — restoring previous wheels..."
+                mv "$FI_BACKUP"/flashinfer*.whl ./wheels/ 2>/dev/null || true
+                rm -rf "$FI_BACKUP"
+                exit 1
+            fi
+        fi
+
+        # ----------------------------------------------------------
+        # Phase 2: vLLM wheels
+        # ----------------------------------------------------------
+        VLLM_WHEELS_EXIST=false
+        if compgen -G "./wheels/vllm*.whl" > /dev/null 2>&1; then
+            VLLM_WHEELS_EXIST=true
+        fi
+
+        if [ "$VLLM_REF_SET" = true ] || [ -n "$VLLM_PRS" ]; then
+            REBUILD_VLLM=true
+        fi
+
+        if [ "$REBUILD_VLLM" = true ] || [ "$VLLM_WHEELS_EXIST" = false ]; then
+            if [ "$REBUILD_VLLM" = true ]; then
+                if [ "$VLLM_REF_SET" = true ] && [ -n "$VLLM_PRS" ]; then
+                    echo "Rebuilding vLLM wheels (--vllm-ref and --apply-vllm-pr specified)..."
+                elif [ "$VLLM_REF_SET" = true ]; then
+                    echo "Rebuilding vLLM wheels (--vllm-ref specified)..."
+                elif [ -n "$VLLM_PRS" ]; then
+                    echo "Rebuilding vLLM wheels (--apply-vllm-pr specified)..."
+                else
+                    echo "Rebuilding vLLM wheels (--rebuild-vllm specified)..."
+                fi
+            else
+                echo "No vLLM wheels found in ./wheels/ — building..."
+            fi
+
+            # Back up existing vllm wheels; restore them if the build fails
+            VLLM_BACKUP="./wheels/.backup-vllm"
+            rm -rf "$VLLM_BACKUP" && mkdir -p "$VLLM_BACKUP"
+            for f in ./wheels/vllm*.whl; do
+                [ -f "$f" ] && mv "$f" "$VLLM_BACKUP/"
+            done
+
+            VLLM_CMD=("docker" "build"
+                "--target" "vllm-export"
+                "--output" "type=local,dest=./wheels"
+                "${COMMON_BUILD_FLAGS[@]}"
+                "--build-arg" "VLLM_REF=$VLLM_REF")
+
+            if [ "$REBUILD_VLLM" = true ]; then
+                VLLM_CMD+=("--build-arg" "CACHEBUST_VLLM=$(date +%s)")
+            fi
+
+            if [ -n "$VLLM_PRS" ]; then
+                echo "Applying vLLM PRs: $VLLM_PRS"
+                VLLM_CMD+=("--build-arg" "VLLM_PRS=$VLLM_PRS")
+            fi
+
+
+            VLLM_CMD+=(".")
+
+            echo "vLLM build command: ${VLLM_CMD[*]}"
+            VLLM_START=$(date +%s)
+            if "${VLLM_CMD[@]}"; then
+                VLLM_END=$(date +%s)
+                VLLM_BUILD_TIME=$((VLLM_END - VLLM_START))
+                rm -rf "$VLLM_BACKUP"
+            else
+                echo "vLLM build failed — restoring previous wheels..."
+                mv "$VLLM_BACKUP"/vllm*.whl ./wheels/ 2>/dev/null || true
+                rm -rf "$VLLM_BACKUP"
+                exit 1
+            fi
+        else
+            echo "vLLM wheels already present in ./wheels/ — skipping build."
+        fi
+
+        # ----------------------------------------------------------
+        # Phase 3: Runner image
+        # ----------------------------------------------------------
+        if ! compgen -G "./wheels/*.whl" > /dev/null 2>&1; then
+            echo "Error: No wheel files found in ./wheels/ — cannot build runner image."
+            exit 1
+        fi
+
+        RUNNER_CMD=("docker" "build"
+            "-t" "$IMAGE_TAG"
+            "${COMMON_BUILD_FLAGS[@]}")
+
+        if [ "$PRE_TRANSFORMERS" = true ]; then
+            echo "Using transformers>=5.0.0..."
+            RUNNER_CMD+=("--build-arg" "PRE_TRANSFORMERS=1")
+        fi
+
+        RUNNER_CMD+=(".")
+
+        echo "Building runner image with command: ${RUNNER_CMD[*]}"
+        RUNNER_START=$(date +%s)
+        "${RUNNER_CMD[@]}"
+        RUNNER_END=$(date +%s)
+        RUNNER_BUILD_TIME=$((RUNNER_END - RUNNER_START))
     fi
-
-    if [ "$REBUILD_DEPS" = true ]; then
-        echo "Setting CACHEBUST_DEPS..."
-        CMD+=("--build-arg" "CACHEBUST_DEPS=$(date +%s)")
-    fi
-
-    if [ "$REBUILD_VLLM" = true ]; then
-        echo "Setting CACHEBUST_VLLM..."
-        CMD+=("--build-arg" "CACHEBUST_VLLM=$(date +%s)")
-    fi
-
-    # Add TRITON_REF to build arguments
-    CMD+=("--build-arg" "TRITON_REF=$TRITON_REF")
-
-    # Add VLLM_REF to build arguments
-    CMD+=("--build-arg" "VLLM_REF=$VLLM_REF")
-
-    # Add BUILD_JOBS to build arguments
-    CMD+=("--build-arg" "BUILD_JOBS=$BUILD_JOBS")
-
-    # Add GPU architecture to build arguments
-    CMD+=("--build-arg" "TORCH_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
-    CMD+=("--build-arg" "FLASHINFER_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
-
-    if [ "$PRE_FLASHINFER" = true ]; then
-        echo "Using pre-release FlashInfer..."
-        CMD+=("--build-arg" "FLASHINFER_PRE=--pre")
-    fi
-
-    if [ -n "$VLLM_PRS" ]; then
-        echo "Applying vLLM PRs: $VLLM_PRS"
-        CMD+=("--build-arg" "VLLM_PRS=$VLLM_PRS")
-    fi
-
-    if [ "$PRE_TRANSFORMERS" = true ]; then
-        echo "Using transformers>=5.0.0..."
-        CMD+=("--build-arg" "PRE_TRANSFORMERS=1")
-    fi
-
-    # Add build context
-    CMD+=(".")
-
-    # Execute build
-    echo "Building image with command: ${CMD[*]}"
-    BUILD_START=$(date +%s)
-    "${CMD[@]}"
-    BUILD_END=$(date +%s)
-    BUILD_TIME=$((BUILD_END - BUILD_START))
 else
     echo "Skipping build (--no-build specified)"
 fi
 
-# Copy to host if requested
+# =====================================================
+# Copy to host(s) if requested
+# =====================================================
 COPY_TIME=0
 if [ "${#COPY_HOSTS[@]}" -gt 0 ]; then
     echo "Copying image '$IMAGE_TAG' to ${#COPY_HOSTS[@]} host(s): ${COPY_HOSTS[*]}"
@@ -320,12 +479,18 @@ echo ""
 echo "========================================="
 echo "         TIMING STATISTICS"
 echo "========================================="
-if [ "$BUILD_TIME" -gt 0 ]; then
-    echo "Docker Build:  $(printf '%02d:%02d:%02d' $((BUILD_TIME/3600)) $((BUILD_TIME%3600/60)) $((BUILD_TIME%60)))"
+if [ "$FLASHINFER_BUILD_TIME" -gt 0 ]; then
+    echo "FlashInfer Build: $(printf '%02d:%02d:%02d' $((FLASHINFER_BUILD_TIME/3600)) $((FLASHINFER_BUILD_TIME%3600/60)) $((FLASHINFER_BUILD_TIME%60)))"
+fi
+if [ "$VLLM_BUILD_TIME" -gt 0 ]; then
+    echo "vLLM Build:       $(printf '%02d:%02d:%02d' $((VLLM_BUILD_TIME/3600)) $((VLLM_BUILD_TIME%3600/60)) $((VLLM_BUILD_TIME%60)))"
+fi
+if [ "$RUNNER_BUILD_TIME" -gt 0 ]; then
+    echo "Runner Build:     $(printf '%02d:%02d:%02d' $((RUNNER_BUILD_TIME/3600)) $((RUNNER_BUILD_TIME%3600/60)) $((RUNNER_BUILD_TIME%60)))"
 fi
 if [ "$COPY_TIME" -gt 0 ]; then
-    echo "Image Copy:    $(printf '%02d:%02d:%02d' $((COPY_TIME/3600)) $((COPY_TIME%3600/60)) $((COPY_TIME%60)))"
+    echo "Image Copy:       $(printf '%02d:%02d:%02d' $((COPY_TIME/3600)) $((COPY_TIME%3600/60)) $((COPY_TIME%60)))"
 fi
-echo "Total Time:    $(printf '%02d:%02d:%02d' $((TOTAL_TIME/3600)) $((TOTAL_TIME%3600/60)) $((TOTAL_TIME%60)))"
+echo "Total Time:       $(printf '%02d:%02d:%02d' $((TOTAL_TIME/3600)) $((TOTAL_TIME%3600/60)) $((TOTAL_TIME%60)))"
 echo "========================================="
 echo "Done building $IMAGE_TAG."

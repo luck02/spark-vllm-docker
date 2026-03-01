@@ -26,7 +26,7 @@ While it was primarily developed to support multi-node inference, it works just 
 
 This repository is not affiliated with NVIDIA or their subsidiaries. This is a community effort aimed to help DGX Spark users to set up and run the most recent versions of vLLM on Spark cluster or single nodes. 
 
-The Dockerfile builds from the main branch of VLLM, so depending on when you run the build process, it may not be in fully functioning state. You can target a specific vLLM release by setting `--vllm-ref` parameter or use `--use-wheels release` to install pre-built release wheels.
+The Dockerfile builds from the main branch of VLLM, so depending on when you run the build process, it may not be in fully functioning state. You can target a specific vLLM release by setting `--vllm-ref` parameter.
 
 ## QUICK START
 
@@ -40,26 +40,6 @@ cd spark-vllm-docker
 ```
 
 Build the container.
-
-**ATTENTION!** 
-
-As of February 9th, 2026, wheels build is no longer recommended way to build the container due to a lack of optimizations present in the source build.
-If you still want to use wheels build, please see a note below:
-
-If you are getting the following error (or similar) when building from wheels, you need to build the image from the source instead of using pre-built wheels. To do it, just remove `--use-wheels` parameter from the build command:
-
-```
-0.181 Using Python 3.12.3 environment at: /usr
-0.559   × No solution found when resolving dependencies:
-0.559   ╰─▶ Because only vllm==0.15.0rc2.dev49+g59bcc5b6f.cu130 is available and
-0.559       vllm==0.15.0rc2.dev49+g59bcc5b6f.cu130 has no wheels with a matching
-0.559       platform tag (e.g., `manylinux_2_39_aarch64`), we can conclude that all
-0.559       versions of vllm cannot be used.
-0.559       And because you require vllm, we can conclude that your requirements
-0.559       are unsatisfiable.
-```
-
-This error happens if vLLM nightly build fails for aarch64 platform, but succeeds for x86-64. You can check the status of vLLM nightly wheels at https://wheels.vllm.ai/nightly/cu130/vllm/
 
 **If you have only one DGX Spark:**
 
@@ -78,7 +58,7 @@ Then run the following command that will build and distribute image across the c
 ./build-and-copy.sh -c
 ```
 
-An initial build will take around 30 minutes, but subsequent builds will be faster. You can also use precompiled wheels which significantly speed up the build, but source build is recommended because it uses components specifically compiled for DGX Spark.
+An initial build will take around 20-30 minutes, but subsequent builds will be faster. Precompiled vLLM wheels for DGX Spark will also be available soon.
 
 ### Run
 
@@ -142,6 +122,8 @@ This will run the model on all available cluster nodes.
 
 **NOTE:** do not use `--load-format fastsafetensors` if you are loading models that would take >0.8 of available RAM (without KV cache) as it may result in out of memory situation.
 
+**Also:** You can use any vLLM container that has "bash" as its default entrypoint with the launch script. It was tested with NGC vLLM, but can work with others too. To use such container in the cluster, you need to specify `--apply-mod use-ngc-vllm` argument to `./launch-cluster.sh`. However, it's recommended to build the container using this repository for best compatibility and most up-to-date features. 
+
 ## CHANGELOG
 
 **IMPORTANT**
@@ -163,6 +145,69 @@ docker builder prune
 Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
+
+### 2026-02-18
+
+#### Completely Redesigned Build Process
+
+`build-and-copy.sh` now automatically downloads prebuilt FlashInfer wheels from the [GitHub releases](https://github.com/eugr/spark-vllm-docker/releases/tag/prebuilt-flashinfer-current) before falling back to a local build. This eliminates the need to compile FlashInfer from source on first use, which typically takes around 20 minutes.
+
+The download logic:
+- If prebuilt wheels are available and newer than any locally cached version, they are downloaded automatically.
+- If the download fails (e.g. no network, release not found, gpu arch is not compatible), the script falls back to building locally, or reuses existing local wheels if present.
+- `--rebuild-flashinfer` skips the download entirely and forces a fresh local build.
+
+No new flags are required - the download happens transparently unless `--rebuild-flashinfer` is specified.
+
+All wheels (downloaded or built locally) are cached in the `./wheels` directory for subsequent reuse.
+
+- `--rebuild-flashinfer` will force FlashInfer rebuild from the flashinfer `main` branch.
+- `--rebuild-vllm` will force vLLM rebuild from vLLM `main` branch or specific commit in `--vllm-ref`.
+
+Please, note that specifying `--vllm-ref` or `--apply-vllm-pr` will force vLLM rebuild every time.
+
+### 2026-02-17
+
+#### Non-Privileged Mode Support
+
+Added `--non-privileged` flag to `launch-cluster.sh` for running containers without full privileged access while maintaining RDMA/InfiniBand functionality:
+
+- Replaces `--privileged` with `--cap-add=IPC_LOCK`
+- Replaces `--ipc=host` with `--shm-size=64g` (configurable via `--shm-size-gb`)
+- Exposes RDMA devices via `--device=/dev/infiniband`
+- Adds resource limits: memory (110GB), memory+swap (120GB), pids (4096)
+
+Example usage:
+```bash
+./launch-cluster.sh --non-privileged exec vllm serve ...
+./launch-cluster.sh --non-privileged --mem-limit-gb 120 --shm-size-gb 64 exec vllm serve ...
+```
+
+May result in a slightly reduced performance (within 2%) in exchange for better reliability and stability.
+
+#### Qwen3-Coder-Next recipe update
+
+Updated `qwen3-coder-next-fp8` recipe: KV cache type changed to `fp8` and maximum context length reduced to 131072 tokens to reliably fit within a single Spark's memory.
+
+### 2026-02-16
+
+#### MiniMax M2.5 AWQ recipe
+
+Added a new recipe `minimax-m2.5-awq` for running MiniMax-Text-01-AWQ (M2.5). Usage:
+
+```bash
+./run-recipe.sh minimax-m2.5-awq
+```
+
+#### GLM-4.7-Flash-AWQ mod extended with vLLM crash fix
+
+The `fix-glm-4.7-flash-AWQ` mod now also applies the fix from [PR #34695](https://github.com/vllm-project/vllm/pull/34695), which addresses a crash in `mla_attention.py` when running GLM models with AWQ quantization. The patch is applied automatically alongside the existing speed fix, and is skipped if it has already been merged into the installed vLLM version.
+
+### 2026-02-13
+
+#### FlashInfer cubin caching
+
+FlashInfer cubins (pre-compiled GPU kernels) are now cached via a Docker bind mount and reused across rebuilds. Previously, all cubins were recompiled from scratch on every FlashInfer rebuild even if unchanged. This significantly reduces FlashInfer rebuild times when only minor source changes are made.
 
 ### 2026-02-12
 
@@ -534,43 +579,11 @@ Applied patch to enable FastSafeTensors in cluster configuration (EXPERIMENTAL) 
 
 ### Building Manually
 
-The Dockerfile includes specific **Build Arguments** to allow you to selectively rebuild layers (e.g., update the vLLM source code without re-downloading PyTorch).
-Using a provided build script is recommended, but if you want to build using `docker build` command, here are the supported build arguments:
+Building the container manually is no longer supported due to Dockerfile complexity. Please use the provided build script.
 
-| Argument | Default | Description |
-| :--- | :--- | :--- |
-| `CACHEBUST_DEPS` | `1` | Change this to force a re-download of PyTorch, FlashInfer, and system dependencies. |
-| `CACHEBUST_VLLM` | `1` | Change this to force a fresh git clone and rebuild of vLLM source code. |
-| `TRITON_REF` | `v3.6.0` | Triton commit SHA, branch, or tag to build - currently ignored. |
-| `VLLM_REF` | `main` | vLLM commit SHA, branch, or tag to build. |
-| `TORCH_CUDA_ARCH_LIST` | `12.1a` | Target GPU architecture list for PyTorch. |
-| `FLASHINFER_CUDA_ARCH_LIST` | `12.1a` | Target GPU architecture list for FlashInfer. |
-| `BUILD_JOBS` | `16` | Number of parallel build jobs (default: 16). |
-| `FLASHINFER_PRE` | `""` | Set to `--pre` to use pre-release versions of FlashInfer. |
-| `PRE_TRANSFORMERS` | `0` | Set to `1` to install pre-release transformers (5.0.0rc or higher). |
+### Using the Build Script
 
-### Building Manually using Wheels
-
-If you prefer to use pre-built wheels (faster build, smaller image), you can use `Dockerfile.wheels`.
-
-```bash
-docker build -f Dockerfile.wheels -t vllm-node .
-```
-
-Supported build arguments for `Dockerfile.wheels`:
-
-| Argument | Default | Description |
-| :--- | :--- | :--- |
-| `BUILD_JOBS` | `16` | Number of parallel build jobs (default: 16). |
-| `CACHEBUST_VLLM` | `1` | Change this to force a re-download of vLLM wheels. |
-| `WHEELS_FROM_GITHUB_RELEASE` | `0` | Set to `1` to use GitHub release wheels instead of nightly wheels. |
-| `FLASHINFER_PRE` | `""` | Set to `--pre` to use pre-release versions of FlashInfer. |
-| `PRE_TRANSFORMERS` | `0` | Set to `1` to install pre-release transformers (5.0.0rc or higher). |
-| `TORCH_CUDA_ARCH_LIST` | `12.1a` | Target GPU architecture list. |
-
-### Using the Build Script (Recommended)
-
-The `build-and-copy.sh` script automates the build process and optionally copies the image to one or more nodes. This is the recommended method for building and deploying to multiple Spark nodes.
+The `build-and-copy.sh` script automates the build process and optionally copies the image to one or more nodes. This is the officially supported method for building and deploying to multiple Spark nodes.
 
 **Basic usage (build only):**
 
@@ -581,7 +594,7 @@ The `build-and-copy.sh` script automates the build process and optionally copies
 **Build with a custom tag:**
 
 ```bash
-./build-and-copy.sh --tag my-vllm-node
+./build-and-copy.sh -t my-vllm-node
 ```
 
 **Build and copy to Spark node(s):**
@@ -618,29 +631,24 @@ Using a different username:
 ./build-and-copy.sh --copy-to 192.168.177.12 --user your_username
 ```
 
-**Force rebuild vLLM source only:**
+**Force rebuild vLLM from source:**
 
 ```bash
 ./build-and-copy.sh --rebuild-vllm
 ```
 
-**Force rebuild all dependencies:**
+**Force rebuild FlashInfer from source (skips prebuilt wheel download):**
 
 ```bash
-./build-and-copy.sh --rebuild-deps
+./build-and-copy.sh --rebuild-flashinfer
 ```
 
 **Combined example (rebuild vLLM and copy to another node):**
 
 ```bash
-./build-and-copy.sh --rebuild-vllm --copy-to 192.168.177.12
+./build-and-copy.sh --rebuild-vllm -c 192.168.177.12
 ```
 
-**Build with specific Triton commit:**
-
-```bash
-./build-and-copy.sh --triton-ref abc123def456
-```
 **Build for specific GPU architecture:**
 
 ```bash
@@ -657,26 +665,24 @@ Using a different username:
 
 | Flag | Description |
 | :--- | :--- |
-| `-t, --tag <tag>` | Image tag (default: 'vllm-node') |
-| `--gpu-arch <arch>` | Target GPU architecture (default: '12.1a') |
-| `-t, --tag <tag>` | Image tag (default: 'vllm-node') |
-| `--rebuild-deps` | Force rebuild all dependencies (sets CACHEBUST_DEPS) |
-| `--rebuild-vllm` | Force rebuild vLLM source only (sets CACHEBUST_VLLM) |
-| `--triton-ref <ref>` | Triton commit SHA, branch or tag (default: 'v3.5.1') |
-| `--vllm-ref <ref>` | vLLM commit SHA, branch or tag (default: 'main') |
-| `--pre-tf` | Install pre-release transformers (5.0.0rc or higher). Alias: `--pre-transformers`. |
+| `-t, --tag <tag>` | Image tag (default: `vllm-node`) |
+| `--gpu-arch <arch>` | Target GPU architecture (default: `12.1a`) |
+| `--rebuild-flashinfer` | Skip prebuilt wheel download; force a fresh local FlashInfer build |
+| `--rebuild-vllm` | Force rebuild vLLM from source |
+| `--vllm-ref <ref>` | vLLM commit SHA, branch or tag (default: `main`) |
+| `--apply-vllm-pr <pr-num>` | Apply a vLLM PR patch during build. Can be specified multiple times. |
+| `--tf5` | Install transformers v5 (5.0.0 or higher). Aliases: `--pre-tf, --pre-transformers`. |
 | `--exp-mxfp4` | Build with experimental native MXFP4 support. Alias: `--experimental-mxfp4`. |
-| `--use-wheels [mode]` | Use pre-built vLLM wheels. Mode: `nightly` (default) or `release`. |
-| `--pre-flashinfer` | Use pre-release versions of FlashInfer. |
-| `-c, --copy-to <host[,host...] or host host...>` | Host(s) to copy the image to after building (space- or comma-separated list after the flag). |
+| `-c, --copy-to <hosts>` | Host(s) to copy the image to after building (space- or comma-separated). |
 | `--copy-to-host` | Alias for `--copy-to` (backwards compatibility). |
 | `--copy-parallel` | Copy to all specified hosts concurrently. |
-| `-j, --build-jobs <jobs>` | Number of parallel build jobs (default: Dockerfile default) |
+| `-j, --build-jobs <jobs>` | Number of parallel build jobs (default: 16) |
 | `-u, --user <user>` | Username for SSH connection (default: current user) |
+| `--full-log` | Enable full Docker build output (`--progress=plain`) |
 | `--no-build` | Skip building, only copy existing image (requires `--copy-to`) |
 | `-h, --help` | Show help message |
 
-**IMPORTANT**: When copying to another node, make sure you use the Spark IP assigned to its ConnectX 7 interface (enp1s0f1np1), and not the 10G interface (enP7s7)!
+**IMPORTANT**: When copying to another node, make sure you use the Spark IP assigned to its ConnectX 7 interface (enp1s0f1np1), and not the 10G interface (enP7s7)! If you omit the IP address and use `-c` without addresses, it will use autodiscovery to detect a proper IP address.
 
 ### Copying the container to another Spark node (Manual Method)
 
@@ -765,6 +771,7 @@ You can override the auto-detected values if needed:
 | `--eth-if` | Ethernet interface name. |
 | `--ib-if` | InfiniBand interface name. |
 | `-e, --env` | Environment variable to pass to container (e.g. `-e VAR=val`). Can be used multiple times. |
+| `-j` | Number of parallel jobs for build environment variables (optional). |
 | `--apply-mod` | Apply mods/patches from specified directory. Can be used multiple times to apply multiple mods. |
 | `--nccl-debug` | NCCL debug level (e.g., INFO, WARN). Defaults to INFO if flag is present but value is omitted. |
 | `--check-config` | Check configuration and auto-detection without launching. |
@@ -772,6 +779,34 @@ You can override the auto-detected values if needed:
 | `--no-cache-dirs` | Do not mount default cache directories (~/.cache/vllm, ~/.cache/flashinfer, ~/.triton). |
 | `--launch-script` | Path to bash script to execute in the container (from examples/ directory or absolute path). If launch script is specified, action should be omitted. |
 | `-d` | Run in daemon mode (detached). |
+| `--non-privileged` | Run in non-privileged mode (removes `--privileged` and `--ipc=host`). |
+| `--mem-limit-gb` | Memory limit in GB (default: 110, only with `--non-privileged`). |
+| `--mem-swap-limit-gb` | Memory+swap limit in GB (default: mem-limit + 10, only with `--non-privileged`). |
+| `--pids-limit` | Process limit (default: 4096, only with `--non-privileged`). |
+| `--shm-size-gb` | Shared memory size in GB (default: 64, only with `--non-privileged`). |
+
+### Non-Privileged Mode
+
+The `--non-privileged` flag allows running containers without full privileged access while maintaining RDMA/InfiniBand functionality:
+
+```bash
+./launch-cluster.sh --non-privileged exec vllm serve ...
+```
+
+When `--non-privileged` is specified:
+- `--privileged` is replaced with `--cap-add=IPC_LOCK`
+- `--ipc=host` is replaced with `--shm-size=64g` (configurable via `--shm-size-gb`)
+- RDMA devices are exposed via `--device=/dev/infiniband`
+- Resource limits are applied: memory (110GB), memory+swap (120GB), pids (4096)
+
+These resource limits can be customized:
+```bash
+./launch-cluster.sh --non-privileged \
+  --mem-limit-gb 120 \
+  --mem-swap-limit-gb 130 \
+  --shm-size-gb 64 \
+  exec vllm serve ...
+```
 
 ## 3\. Running the Container (Manual)
 

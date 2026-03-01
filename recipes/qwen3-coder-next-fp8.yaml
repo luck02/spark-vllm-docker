@@ -24,7 +24,7 @@ defaults:
   host: 0.0.0.0
   tensor_parallel: 2
   gpu_memory_utilization: 0.7
-  max_model_len: 262144
+  max_model_len: 131072
 
 # Environment variables
 env: {}
@@ -37,6 +37,7 @@ command: |
     --gpu-memory-utilization {gpu_memory_utilization} \
     --host {host} \
     --port {port} \
+    --kv-cache-dtype fp8 \
     --load-format fastsafetensors \
     --attention-backend flashinfer \
     --enable-prefix-caching \

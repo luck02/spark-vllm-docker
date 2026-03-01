@@ -1,12 +1,12 @@
-# Recipe: MiniMax-M2-AWQ
-# MiniMax M2 model with AWQ quantization
+# Recipe: MiniMax-M2.5-AWQ
+# MiniMax M2.5 model with AWQ quantization
 
 recipe_version: "1"
-name: MiniMax-M2-AWQ
-description: vLLM serving MiniMax-M2-AWQ with Ray distributed backend
+name: MiniMax-M2.5-AWQ
+description: vLLM serving MiniMax-M2.5-AWQ with Ray distributed backend
 
 # HuggingFace model to download (optional, for --download-model)
-model: QuantTrio/MiniMax-M2-AWQ
+model: cyankiwi/MiniMax-M2.5-AWQ-4bit
 
 # Container image to use
 container: vllm-node
@@ -30,7 +30,8 @@ env: {}
 
 # The vLLM serve command template
 command: |
-  vllm serve QuantTrio/MiniMax-M2-AWQ \
+  vllm serve cyankiwi/MiniMax-M2.5-AWQ-4bit \
+      --trust-remote-code \
       --port {port} \
       --host {host} \
       --gpu-memory-utilization {gpu_memory_utilization} \

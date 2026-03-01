@@ -64,36 +64,9 @@ ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 
 # =========================================================
-# STAGE 2: Builder (Builds Triton, Flashinfer and vLLM from Source)
+# STAGE 2: FlashInfer Builder
 # =========================================================
-FROM base AS builder
-
-
-# # ======= Triton Build ========== 
-
-# # Initial Triton repo clone (cached forever)
-# RUN git clone https://github.com/triton-lang/triton.git
-
-# # We expect TRITON_REF to be passed from the command line to break the cache
-# # Set to v3.6.0 by default
-# ARG TRITON_REF=v3.6.0
-
-# WORKDIR $VLLM_BASE_DIR/triton
-
-# # This only runs if TRITON_REF differs from the last build
-# RUN --mount=type=cache,id=ccache,target=/root/.ccache \
-#     --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-#     git fetch origin && \
-#     git checkout ${TRITON_REF} && \
-#     git submodule sync && \
-#     git submodule update --init --recursive && \
-#     uv pip install -r python/requirements.txt && \
-#     mkdir -p /workspace/wheels && \
-#     rm -rf .git && \
-#     uv build --no-build-isolation --wheel --out-dir=/workspace/wheels -v .  && \
-#     uv build --no-build-isolation --wheel --no-index --out-dir=/workspace/wheels python/triton_kernels 
-
-# ======= FlashInfer Build ==========
+FROM base AS flashinfer-builder
 
 ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
 ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
@@ -102,17 +75,14 @@ ARG FLASHINFER_REF=main
 
 # --- CACHE BUSTER ---
 # Change this argument to force a re-download of FlashInfer
-ARG CACHEBUST_DEPS=1
+ARG CACHEBUST_FLASHINFER=1
 
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
      uv pip install nvidia-nvshmem-cu13 "apache-tvm-ffi<0.2"
 
-# 4. Smart Git Clone (Fetch changes instead of full re-clone)
-# We mount a cache at /repo-cache. This directory persists on your host machine.
+# Smart Git Clone (Fetch changes instead of full re-clone)
 RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
-    # 1. Go into the persistent cache directory
     cd /repo-cache && \
-    # 2. Logic: Clone if missing, otherwise Fetch & Reset
     if [ ! -d "flashinfer" ]; then \
         echo "Cache miss: Cloning FlashInfer from scratch..." && \
         git clone --recursive https://github.com/flashinfer-ai/flashinfer.git; \
@@ -124,59 +94,58 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
         echo "Cache hit: Fetching flashinfer updates..." && \
         cd flashinfer && \
         git fetch origin && \
-        git fetch origin --tags && \
+        git fetch origin --tags --force && \
         (git checkout --detach origin/${FLASHINFER_REF} 2>/dev/null || git checkout ${FLASHINFER_REF}) && \
         git submodule update --init --recursive && \
         git clean -fdx && \
-        # Optimize git repo size
         git gc --auto; \
     fi && \
-    # 3. Copy the updated code from the cache to the actual container workspace
-    # We use 'cp -a' to preserve permissions
     cp -a /repo-cache/flashinfer /workspace/flashinfer
-
-# Build FlashInfer wheels
 
 WORKDIR /workspace/flashinfer
 
 # Apply patch to avoid re-downloading existing cubins
 COPY flashinfer_cache.patch .
-RUN patch -p1 < flashinfer_cache.patch
-
-# flashinfer-python
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=cache,id=ccache,target=/root/.ccache \
     --mount=type=cache,id=cubins-cache,target=/workspace/flashinfer/flashinfer-cubin/flashinfer_cubin/cubins \
+    patch -p1 < flashinfer_cache.patch && \
+    # flashinfer-python
     sed -i -e 's/license = "Apache-2.0"/license = { text = "Apache-2.0" }/' -e '/license-files/d' pyproject.toml && \
+    uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v && \
+    # flashinfer-cubin
+    cd flashinfer-cubin && uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v && \
+    # flashinfer-jit-cache
+    cd ../flashinfer-jit-cache && \
     uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
 
-# flashinfer-cubin
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    --mount=type=cache,id=ccache,target=/root/.ccache \
-    --mount=type=cache,id=cubins-cache,target=/workspace/flashinfer/flashinfer-cubin/flashinfer_cubin/cubins \
-    cd flashinfer-cubin && uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
+# =========================================================
+# STAGE 3: FlashInfer Wheel Export
+# =========================================================
+FROM scratch AS flashinfer-export
+COPY --from=flashinfer-builder /workspace/wheels /
 
-# flashinfer-jit-cache
+# =========================================================
+# STAGE 4: vLLM Builder
+# =========================================================
+FROM base AS vllm-builder
+
+ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+WORKDIR $VLLM_BASE_DIR
+
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    --mount=type=cache,id=ccache,target=/root/.ccache \
-    --mount=type=cache,id=cubins-cache,target=/workspace/flashinfer/flashinfer-cubin/flashinfer_cubin/cubins \
-    cd flashinfer-jit-cache && \
-    uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
+     uv pip install nvidia-nvshmem-cu13 "apache-tvm-ffi<0.2"
 
 # --- VLLM SOURCE CACHE BUSTER ---
-# Change THIS argument to force a fresh git clone and rebuild of vLLM
-# without re-installing the dependencies above.
 ARG CACHEBUST_VLLM=1
 
 # Git reference (branch, tag, or SHA) to checkout
 ARG VLLM_REF=main
 
-# 4. Smart Git Clone (Fetch changes instead of full re-clone)
-# We mount a cache at /repo-cache. This directory persists on your host machine.
+# Smart Git Clone (Fetch changes instead of full re-clone)
 RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
-    # 1. Go into the persistent cache directory
     cd /repo-cache && \
-    # 2. Logic: Clone if missing, otherwise Fetch & Reset
     if [ ! -d "vllm" ]; then \
         echo "Cache miss: Cloning vLLM from scratch..." && \
         git clone --recursive https://github.com/vllm-project/vllm.git; \
@@ -188,15 +157,12 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
         echo "Cache hit: Fetching updates..." && \
         cd vllm && \
         git fetch origin && \
-        git fetch origin --tags && \
+        git fetch origin --tags --force && \
         (git checkout --detach origin/${VLLM_REF} 2>/dev/null || git checkout ${VLLM_REF}) && \
         git submodule update --init --recursive && \
         git clean -fdx && \
-        # Optimize git repo size
         git gc --auto; \
     fi && \
-    # 3. Copy the updated code from the cache to the actual container workspace
-    # We use 'cp -a' to preserve permissions
     cp -a /repo-cache/vllm $VLLM_BASE_DIR/
 
 WORKDIR $VLLM_BASE_DIR/vllm
@@ -211,18 +177,12 @@ RUN if [ -n "$VLLM_PRS" ]; then \
         done; \
     fi
 
-ARG PRE_TRANSFORMERS=0
-
 # Prepare build requirements
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     python3 use_existing_torch.py && \
     sed -i "/flashinfer/d" requirements/cuda.txt && \
     sed -i '/^triton\b/d' requirements/test.txt && \
     sed -i '/^fastsafetensors\b/d' requirements/test.txt && \
-    if [ "$PRE_TRANSFORMERS" = "1" ]; then \
-        sed -i '/^transformers\b/d' requirements/common.txt; \
-        sed -i '/^transformers\b/d' requirements/test.txt; \
-    fi && \
     uv pip install -r requirements/build.txt
 
 # Apply Patches
@@ -233,21 +193,23 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 #     else \
 #         patch -p1 < fastsafetensors.patch; \
 #     fi
+# TEMPORARY PATCH for broken vLLM build (unguarded Hopper code) - reverting PR #34758 and #34302
+RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
+RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34302.diff | patch -p1 -R || echo "Cannot revert PR #34302, skipping"
 
 # Final Compilation
-# We mount the ccache directory here. Ideally, map this to a host volume for persistence 
-# across totally separate `docker build` invocations.
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
     --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v
 
-# # Install custom Triton from triton-builder
-# COPY --from=triton-builder /workspace/wheels /workspace/wheels
-# RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-#     uv pip install /workspace/wheels/*.whl
+# =========================================================
+# STAGE 5: vLLM Wheel Export
+# =========================================================
+FROM scratch AS vllm-export
+COPY --from=vllm-builder /workspace/wheels /
 
 # =========================================================
-# STAGE 4: Runner (Transfers only necessary artifacts)
+# STAGE 6: Runner (Installs wheels from host ./wheels/)
 # =========================================================
 FROM nvcr.io/nvidia/pytorch:26.01-py3 AS runner
 
@@ -290,15 +252,17 @@ RUN mkdir -p tiktoken_encodings && \
     wget -O tiktoken_encodings/o200k_base.tiktoken "https://openaipublic.blob.core.windows.net/encodings/o200k_base.tiktoken" && \
     wget -O tiktoken_encodings/cl100k_base.tiktoken "https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken"
 
-# Copy artifacts from Builder Stage
-RUN --mount=type=bind,from=builder,source=/workspace/wheels,target=/mount/wheels \
-    --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install /mount/wheels/*.whl
-
 ARG PRE_TRANSFORMERS=0
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+
+# Install wheels from host ./wheels/ (bind-mounted from build context — no layer bloat)
+# With --tf5: override vLLM's transformers<5 constraint to get transformers>=5
+RUN --mount=type=bind,source=wheels,target=/workspace/wheels \
+    --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     if [ "$PRE_TRANSFORMERS" = "1" ]; then \
-        uv pip install -U transformers --pre; \
+        echo "transformers>=5.0.0" > /tmp/tf-override.txt && \
+        uv pip install /workspace/wheels/*.whl --override /tmp/tf-override.txt; \
+    else \
+        uv pip install /workspace/wheels/*.whl; \
     fi
 
 # Setup environment for runtime

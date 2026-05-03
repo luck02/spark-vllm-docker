@@ -1,2 +1,6 @@
 .env
 build-metadata.yaml
+# Build artifacts — wheels are produced by the build, not sources
+wheels/*.whl
+wheels/.flashinfer-commit
+wheels/.vllm-commit

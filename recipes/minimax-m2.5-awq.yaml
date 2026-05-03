@@ -39,6 +39,11 @@ command: |
       --distributed-executor-backend ray \
       --max-model-len {max_model_len} \
       --load-format fastsafetensors \
+      --max-num-seqs 8 \
+      --max-num-batched-tokens 8192 \
+      --enable-prefix-caching \
+      --enable-chunked-prefill \
+      --kv-cache-dtype fp8 \
       --enable-auto-tool-choice \
       --tool-call-parser minimax_m2 \
       --reasoning-parser minimax_m2_append_think

@@ -4,3 +4,7 @@ build-metadata.yaml
 wheels/*.whl
 wheels/.flashinfer-commit
 wheels/.vllm-commit
+
+# Python bytecode / caches
+__pycache__/
+*.pyc

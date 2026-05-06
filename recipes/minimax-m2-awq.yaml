@@ -40,4 +40,4 @@ command: |
       --load-format fastsafetensors \
       --enable-auto-tool-choice \
       --tool-call-parser minimax_m2 \
-      --reasoning-parser minimax_m2
+      --reasoning-parser deepseek_r1

@@ -1,0 +1,117 @@
+# MiniMax-M2.7-AWQ Tuning Sweep — Experiment Definitions
+# Baseline: T1.2 accepted config (max-num-seqs 16, max-num-batched-tokens 16384, gpu-mem 0.78)
+
+bench:
+  dataset: /root/.cache/huggingface/sharegpt.json
+  model: cyankiwi/MiniMax-M2.7-AWQ-4bit
+  num_prompts: 500
+  concurrencies: [1, 4, 8, 16]
+  container: vllm_node
+  temperature: 0
+  seed: 0
+
+thresholds:
+  tpot_p50_max_regression_ms: 5.0
+  throughput_min_improvement_pct: -2.0
+  throughput_clear_win_pct: 3.0
+
+timeouts:
+  model_load_s: 900
+  bench_per_concurrency_s: 7200
+  cluster_stop_s: 120
+
+max_retries: 2
+
+experiments:
+  # --- Tier 1 (remaining) ---
+
+  - id: T1.3
+    label: long-prefill-threshold
+    description: "Prevents long context pastes from starving short coding turns"
+    recipe_delta:
+      command_append:
+        - "--long-prefill-token-threshold 4096"
+        - "--max-num-partial-prefills 2"
+        - "--max-long-partial-prefills 1"
+
+  - id: T1.4
+    label: piecewise-cudagraphs
+    description: "PIECEWISE cudagraph capture for decode hot path on GB10"
+    recipe_delta:
+      command_append:
+        - "--compilation-config '{\"cudagraph_mode\":\"PIECEWISE\"}'"
+        - "--max-seq-len-to-capture 16384"
+
+  # --- Tier 2 (model-specific kernels) ---
+
+  - id: T2.1
+    label: fuse-minimax-qk-norm
+    description: "Fused Q/K RMSNorm + TP all-reduce (PR #37045, needs image >= 2026-04-10)"
+    requires_image_after: "2026-04-10"
+    recipe_delta:
+      command_replace:
+        "--compilation-config": "--compilation-config '{\"mode\":3,\"cudagraph_mode\":\"PIECEWISE\",\"pass_config\":{\"fuse_minimax_qk_norm\":true}}'"
+
+  - id: T2.2
+    label: flashinfer-moe-fp16
+    description: "Route MoE through FlashInfer CUTLASS kernels instead of Triton fused_moe"
+    recipe_delta:
+      env_add:
+        VLLM_USE_FLASHINFER_MOE_FP16: "1"
+        VLLM_USE_DEEP_GEMM: "0"
+        VLLM_USE_FLASHINFER_SAMPLER: "0"
+
+  - id: T2.3
+    label: explicit-flashinfer-attention
+    description: "Explicit FLASHINFER attention backend (vs auto-detect)"
+    recipe_delta:
+      command_append:
+        - "--attention-backend FLASHINFER"
+
+  # --- Tier 3 (concurrency / frontend) ---
+
+  - id: T3.1
+    label: stream-interval-10
+    description: "Buffer 10 tokens before SSE send — big E2E win at high concurrency"
+    recipe_delta:
+      command_append:
+        - "--stream-interval 10"
+
+  - id: T3.2
+    label: api-server-count-4
+    description: "Scale frontend uvicorn ring to 4 workers"
+    recipe_delta:
+      command_append:
+        - "--api-server-count 4"
+
+  # --- Tier 4 (advanced / uncertain) ---
+
+  - id: T4.1
+    label: expert-parallel
+    description: "Expert parallelism for 256-expert MoE at TP=2"
+    recipe_delta:
+      command_append:
+        - "--enable-expert-parallel"
+
+  - id: T4.2
+    label: dual-batch-overlap
+    description: "Overlap EP all2all with compute (requires T4.1 accepted)"
+    depends_on: T4.1
+    recipe_delta:
+      command_append:
+        - "--enable-dbo"
+
+  - id: T4.3
+    label: nccl-ib-tuning
+    description: "NCCL IB QPS tuning for dual-rail CX-7"
+    recipe_delta:
+      env_add:
+        NCCL_IB_QPS_PER_CONNECTION: "4"
+        NCCL_IB_SPLIT_DATA_ON_QPS: "1"
+
+  - id: T4.4
+    label: ngram-spec-decode
+    description: "N-gram speculative decoding — zero draft model, good for code"
+    recipe_delta:
+      command_append:
+        - "--speculative-config '{\"method\":\"ngram\",\"num_speculative_tokens\":3,\"prompt_lookup_max\":4}'"

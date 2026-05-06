@@ -1,12 +1,12 @@
-# Recipe: MiniMax-M2.5-AWQ
-# MiniMax M2.5 model with AWQ quantization
+# Recipe: MiniMax-M2.7-AWQ
+# MiniMax M2.7 model with AWQ quantization
 
 recipe_version: "1"
-name: MiniMax-M2.5-AWQ
-description: vLLM serving MiniMax-M2.5-AWQ with Ray distributed backend
+name: MiniMax-M2.7-AWQ
+description: vLLM serving MiniMax-M2.7-AWQ with Ray distributed backend
 
 # HuggingFace model to download (optional, for --download-model)
-model: cyankiwi/MiniMax-M2.5-AWQ-4bit
+model: cyankiwi/MiniMax-M2.7-AWQ-4bit
 
 # Container image to use
 container: vllm-node
@@ -22,15 +22,16 @@ defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 2
-  gpu_memory_utilization: 0.7
-  max_model_len: 256000
+  gpu_memory_utilization: 0.78
+  max_model_len: 196608
 
 # Environment variables
-env: {}
+env:
+  SAFETENSORS_FAST_GPU: "1"
 
 # The vLLM serve command template
 command: |
-  vllm serve cyankiwi/MiniMax-M2.5-AWQ-4bit \
+  vllm serve cyankiwi/MiniMax-M2.7-AWQ-4bit \
       --trust-remote-code \
       --port {port} \
       --host {host} \
@@ -39,11 +40,11 @@ command: |
       --distributed-executor-backend ray \
       --max-model-len {max_model_len} \
       --load-format fastsafetensors \
-      --max-num-seqs 8 \
-      --max-num-batched-tokens 8192 \
+      --max-num-seqs 16 \
+      --max-num-batched-tokens 16384 \
       --enable-prefix-caching \
-      --enable-chunked-prefill \
+      --prefix-caching-hash-algo sha256_cbor \
       --kv-cache-dtype fp8 \
       --enable-auto-tool-choice \
       --tool-call-parser minimax_m2 \
-      --reasoning-parser deepseek_r1
+      --reasoning-parser minimax_m2_append_think

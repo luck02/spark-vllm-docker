@@ -1,0 +1,13 @@
+# Runtime artifacts
+results/
+status.json
+sweep.log
+sweep-*.log
+.sweep.lock
+.baseline-recipe.yaml
+intervention.flag
+
+# Python / test artifacts
+__pycache__/
+*.pyc
+.pytest_cache/

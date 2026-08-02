@@ -29,13 +29,29 @@ import sys
 vllm_dir = pathlib.Path(sys.argv[1]) / "vllm"
 prefix = "--- [fix-dspark-shared-experts-0731]"
 
+# vLLM releases/v0.26.x ships the loader as vllm/models/deepseek_v4/*/dspark.py
+# with generic ("gate_up_proj", "w1"/"w3") stacked rules gated by
+# is_layer_param — the shared-expert weights load correctly there and this
+# mod must not touch it. The bug only exists in runtimes using the
+# _STACKED_PARAM_NAME_MAPPING table narrowed to fused_wqa_wkv rows.
+fixed_layout = [
+    p for p in vllm_dir.rglob("dspark.py")
+    if "stacked_params_mapping" in p.read_text()
+    and '"gate_up_proj", "w1"' in p.read_text().replace("'", '"')
+]
+if fixed_layout:
+    print(f"{prefix} loader uses generic w1/w3 stacked rules "
+          f"({fixed_layout[0]}); shared experts load correctly upstream, skipping.")
+    sys.exit(0)
+
 candidates = [
     p for p in vllm_dir.rglob("*dspark*.py")
     if "_STACKED_PARAM_NAME_MAPPING" in p.read_text()
 ]
 if not candidates:
-    print(f"{prefix} no DSpark loader with _STACKED_PARAM_NAME_MAPPING found; "
-          "this image has no DSpark support, skipping.")
+    print(f"{prefix} no _STACKED_PARAM_NAME_MAPPING-style DSpark loader found "
+          "and no known-fixed layout detected — verify draft acceptance "
+          "(~60% healthy vs ~26% with dropped shared experts) after launch.")
     sys.exit(0)
 if len(candidates) > 1:
     print(f"{prefix} multiple DSpark loader candidates: {candidates}")

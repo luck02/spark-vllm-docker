@@ -406,6 +406,43 @@ for mapping in "${VOLUME_MAPPINGS[@]}"; do
     DOCKER_ARGS="$DOCKER_ARGS -v $mapping"
 done
 
+# Auto-mount symlink targets that point outside the cache dir.
+# Without this, e.g. ~/.cache/huggingface/hub -> /mnt/nas/models/huggingface
+# is mounted as a dangling symlink in the container, and any HF cache lookup
+# through it fails with FileNotFoundError. Assumes uniform filesystem layout
+# across cluster nodes (true for this lab — both Sparks NFS-mount the NAS).
+auto_mount_symlink_targets() {
+    local parent="$1"
+    [[ -d "$parent" ]] || return 0
+    local seen=()
+    for entry in "$parent"/*; do
+        [[ -L "$entry" ]] || continue
+        local target
+        target="$(readlink -f "$entry")" || continue
+        [[ -d "$target" ]] || continue
+        case "$target" in
+            "$parent"/*) continue ;;  # inside parent, already covered
+        esac
+        local already=false
+        local t
+        for t in "${seen[@]}"; do
+            [[ "$t" == "$target" ]] && already=true && break
+        done
+        $already && continue
+        seen+=("$target")
+        echo "Auto-mounting symlink target: $entry -> $target"
+        DOCKER_ARGS="$DOCKER_ARGS -v $target:$target"
+    done
+}
+
+# HF cache is mounted unconditionally above; always check it.
+auto_mount_symlink_targets "$HF_CACHE_DIR"
+if [[ "$MOUNT_CACHE_DIRS" == "true" ]]; then
+    auto_mount_symlink_targets "$HOME/.cache/vllm"
+    auto_mount_symlink_targets "$HOME/.cache/flashinfer"
+    auto_mount_symlink_targets "$HOME/.triton"
+fi
+
 # Resolve launch script path if specified
 if [[ -n "$LAUNCH_SCRIPT_PATH" ]]; then
     # Check if it's an absolute path or relative path that exists

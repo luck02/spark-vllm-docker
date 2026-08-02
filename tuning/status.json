@@ -1,0 +1,29 @@
+{
+  "sweep_id": "minimax-m2.7-20260420-223919",
+  "mode": "only:T2.1",
+  "started": "2026-04-21T05:39:19+00:00",
+  "host": "spark1",
+  "pid": 907161,
+  "current_experiment": "T2.1",
+  "current_phase": "completed",
+  "current_concurrency": null,
+  "current_attempt": 2,
+  "experiments_total": 1,
+  "experiments_completed": 1,
+  "experiments_accepted": 0,
+  "experiments_rejected": 0,
+  "experiments_review": 0,
+  "experiments_failed": 1,
+  "experiments_skipped": 0,
+  "consecutive_failures": 1,
+  "last_update": "2026-04-21T06:25:46+00:00",
+  "heartbeat": "2026-04-21T06:25:19+00:00",
+  "intervention": null,
+  "results_so_far": {
+    "T2.1": {
+      "decision": "FAILED",
+      "completed": "2026-04-21T06:25:46+00:00",
+      "reason": "endpoint did not come up"
+    }
+  }
+}

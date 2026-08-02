@@ -1,0 +1,49 @@
+# Recipe: Qwen3-235B-A22B-Instruct-2507-AWQ
+# MoE 235B (22B active) model with AWQ 4-bit quantization
+# Requires TP=2 (cluster mode, both Sparks) — ~58 GiB model per node, ~100 GiB total per node
+# AWQ Marlin conversion at startup is very CPU/memory intensive on unified memory.
+# 0.82 util gives enough headroom for conversion + FlashInfer JIT (MAX_JOBS=16 baked in image).
+# 0.85+ will OOM spark2 during startup. Context can be raised to 131072 if KV cache pressure is OK.
+
+recipe_version: "1"
+name: Qwen3-235B-A22B-Instruct-2507-AWQ
+description: vLLM serving Qwen3-235B-A22B-Instruct-2507-AWQ across both Sparks
+
+# HuggingFace model to download (optional, for --download-model)
+model: QuantTrio/Qwen3-235B-A22B-Instruct-2507-AWQ
+
+# Container image to use
+container: vllm-node
+
+# Cluster-only (124 GB doesn't fit on one Spark)
+cluster_only: true
+
+# No mods required
+mods: []
+
+# Default settings (can be overridden via CLI)
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 2
+  gpu_memory_utilization: 0.82
+  max_model_len: 65536
+
+# Environment variables
+env: {}
+
+# The vLLM serve command template
+command: |
+  vllm serve QuantTrio/Qwen3-235B-A22B-Instruct-2507-AWQ \
+      --port {port} \
+      --host {host} \
+      --gpu-memory-utilization {gpu_memory_utilization} \
+      -tp {tensor_parallel} \
+      --distributed-executor-backend ray \
+      --max-model-len {max_model_len} \
+      --load-format fastsafetensors \
+      --attention-backend flashinfer \
+      --enable-prefix-caching \
+      --enable-chunked-prefill \
+      --kv-cache-dtype fp8 \
+      --trust-remote-code

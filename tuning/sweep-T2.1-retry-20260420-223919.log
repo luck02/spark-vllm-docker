@@ -1,0 +1,36 @@
+[2026-04-20 22:39:19] INFO Starting sweep: minimax-m2.7-20260420-223919
+[2026-04-20 22:39:19] INFO Mode: LIVE
+[2026-04-20 22:39:19] INFO Baseline output_tps c=1: 38.88
+[2026-04-20 22:39:19] INFO Experiments queued: 1
+[2026-04-20 22:39:19] INFO ============================================================
+[2026-04-20 22:39:19] INFO === T2.1 fuse-minimax-qk-norm ===
+[2026-04-20 22:39:19] INFO ============================================================
+[2026-04-20 22:39:19] INFO   Fused Q/K RMSNorm + TP all-reduce (PR #37045, needs image >= 2026-04-10)
+[2026-04-20 22:39:19] INFO Stopping cluster...
+[2026-04-20 22:39:23] INFO Launching cluster...
+[2026-04-20 22:39:35] INFO Cluster launch dispatched
+[2026-04-20 22:39:35] INFO Waiting for endpoint (timeout 900s)...
+[2026-04-20 22:54:35] ERROR Endpoint did not come up within 900s
+[2026-04-20 22:54:35] INFO Stopping cluster...
+[2026-04-20 22:54:59] INFO Launching cluster...
+[2026-04-20 22:55:11] INFO Cluster launch dispatched
+[2026-04-20 22:55:11] INFO Waiting for endpoint (timeout 900s)...
+[2026-04-20 23:10:11] ERROR Endpoint did not come up within 900s
+[2026-04-20 23:10:11] INFO Stopping cluster...
+[2026-04-20 23:10:35] INFO Launching cluster...
+[2026-04-20 23:10:46] INFO Cluster launch dispatched
+[2026-04-20 23:10:46] INFO Waiting for endpoint (timeout 900s)...
+[2026-04-20 23:25:46] ERROR Endpoint did not come up within 900s
+[2026-04-20 23:25:46] INFO   Decision: FAILED
+[2026-04-20 23:25:46] INFO   Reason: endpoint did not come up
+[2026-04-20 23:25:46] INFO   T2.1 FAILED — restoring baseline recipe
+[2026-04-20 23:25:46] INFO 
+[2026-04-20 23:25:46] INFO ============================================================
+[2026-04-20 23:25:46] INFO SWEEP COMPLETE
+[2026-04-20 23:25:46] INFO ============================================================
+[2026-04-20 23:25:46] INFO   Accepted: 0
+[2026-04-20 23:25:46] INFO   Rejected: 0
+[2026-04-20 23:25:46] INFO   Review:   0
+[2026-04-20 23:25:46] INFO   Failed:   1
+[2026-04-20 23:25:46] INFO   Skipped:  0
+[2026-04-20 23:25:46] INFO   Final baseline output_tps c=1: 38.88

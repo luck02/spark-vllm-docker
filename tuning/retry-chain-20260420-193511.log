@@ -1,0 +1,16 @@
+===== CHAIN START 2026-04-21T02:35:11Z =====
+===== [1/4] T1.4 sweep start 2026-04-21T02:35:11Z =====
+[2026-04-20 19:35:11] INFO Starting sweep: minimax-m2.7-20260420-193511
+[2026-04-20 19:35:11] INFO Mode: LIVE
+[2026-04-20 19:35:11] INFO Baseline output_tps c=1: 38.88
+[2026-04-20 19:35:11] INFO Experiments queued: 1
+[2026-04-20 19:35:11] INFO ============================================================
+[2026-04-20 19:35:11] INFO === T1.4 piecewise-cudagraphs ===
+[2026-04-20 19:35:11] INFO ============================================================
+[2026-04-20 19:35:11] INFO   PIECEWISE cudagraph capture for decode hot path on GB10
+[2026-04-20 19:35:11] INFO Stopping cluster...
+[2026-04-20 19:35:40] INFO Launching cluster...
+[2026-04-20 19:35:51] INFO Cluster launch dispatched
+[2026-04-20 19:35:51] INFO Waiting for endpoint (timeout 900s)...
+[2026-04-20 19:38:17] WARNING Received signal 15 — restoring baseline recipe and stopping
+[2026-04-20 19:38:17] INFO Stopping cluster...

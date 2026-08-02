@@ -1,0 +1,84 @@
+# Spark-2 (10.10.0.12) — Qwen3-VL-30B-A3B Abliterated (dynamic FP8) + JoyCaption
+#
+# Models:
+#   8000 - Qwen3-VL-30B-A3B abliterated (~29GB weights via dynamic FP8, 0.50 util)
+#         BF16 weights (~58GB) load during startup then quantize to ~29GB FP8.
+#         0.50 × 119 = ~60GB target → ~25GB KV cache → ~500k tokens.
+#   8001 - JoyCaption Beta LLaVA FP8 (~9GB weights, 0.12 util)
+#
+# Remaining ~7GB reserved for pipeline models (Whisper-AT, emotion2vec, TransNetV2)
+# loaded outside of docker-compose.
+
+services:
+  vllm-qwen3-vl-30b-a3b:
+    container_name: vllm-qwen3-vl-30b-a3b
+    image: vllm-node:latest
+    command: >
+      vllm serve huihui-ai/Huihui-Qwen3-VL-30B-A3B-Instruct-abliterated
+      --host 0.0.0.0
+      --port 8000
+      --dtype bfloat16
+      --quantization fp8
+      --max-model-len 131072
+      --max-num-seqs 3
+      --max-num-batched-tokens 16384
+      --gpu-memory-utilization 0.50
+      --enable-prefix-caching
+      --enable-chunked-prefill
+      --kv-cache-dtype fp8
+      --generation-config vllm
+      --trust-remote-code
+      --enforce-eager
+      --limit-mm-per-prompt '{"image": 8, "video": 4}'
+      --allowed-local-media-path /mnt/pipeline/clips
+    ports:
+      - "8000:8000"
+    volumes:
+      - /home/gary_lucas/.cache/huggingface:/root/.cache/huggingface
+      - /mnt/pipeline/clips:/mnt/pipeline/clips
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+      CUDA_VISIBLE_DEVICES: "0"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    ipc: host
+    shm_size: "64gb"
+    restart: unless-stopped
+
+  vllm-joycaption:
+    container_name: vllm-joycaption
+    image: vllm-node:latest
+    command: >
+      vllm serve fancyfeast/llama-joycaption-beta-one-hf-llava
+      --host 0.0.0.0
+      --port 8001
+      --dtype float16
+      --quantization fp8
+      --max-model-len 8192
+      --max-num-seqs 16
+      --gpu-memory-utilization 0.12
+      --enable-prefix-caching
+      --enable-chunked-prefill
+      --kv-cache-dtype fp8
+      --limit-mm-per-prompt '{"image":1}'
+    ports:
+      - "8001:8001"
+    volumes:
+      - /mnt/storage/huggingface:/root/.cache/huggingface
+      - /mnt/storage/media:/media:ro
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+      CUDA_VISIBLE_DEVICES: "0"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    ipc: host
+    shm_size: "16gb"
+    restart: unless-stopped

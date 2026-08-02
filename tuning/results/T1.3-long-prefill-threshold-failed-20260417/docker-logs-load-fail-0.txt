@@ -1,0 +1,89 @@
+
+==========
+== CUDA ==
+==========
+
+CUDA Version 13.2.0
+
+Container image Copyright (c) 2016-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+
+This container image and its contents are governed by the NVIDIA Deep Learning Container License.
+By pulling and using the container, you accept the terms and conditions of this license:
+https://developer.nvidia.com/ngc/nvidia-deep-learning-container-license
+
+A copy of this license is made available in this container at /NGC-DL-CONTAINER-LICENSE for your convenience.
+
+2026-04-17 05:32:17,086	INFO usage_lib.py:447 -- Usage stats collection is disabled.
+2026-04-17 05:32:17,086	INFO scripts.py:936 -- [37mLocal node IP[39m: [1m169.254.132.124[22m
+2026-04-17 05:32:19,113	SUCC scripts.py:975 -- [32m--------------------[39m
+2026-04-17 05:32:19,113	SUCC scripts.py:976 -- [32mRay runtime started.[39m
+2026-04-17 05:32:19,113	SUCC scripts.py:977 -- [32m--------------------[39m
+2026-04-17 05:32:19,113	INFO scripts.py:979 -- [36mNext steps[39m
+2026-04-17 05:32:19,113	INFO scripts.py:982 -- To add another node to this Ray cluster, run
+2026-04-17 05:32:19,113	INFO scripts.py:985 -- [1m  ray start --address='169.254.132.124:29501'[22m
+2026-04-17 05:32:19,113	INFO scripts.py:996 -- To connect to this Ray cluster:
+2026-04-17 05:32:19,113	INFO scripts.py:998 -- [35mimport[39m[26m ray
+2026-04-17 05:32:19,113	INFO scripts.py:999 -- ray[35m.[39m[26minit(_node_ip_address[35m=[39m[26m[33m'169.254.132.124'[39m[26m)
+2026-04-17 05:32:19,113	INFO scripts.py:1032 -- To terminate the Ray runtime, run
+2026-04-17 05:32:19,113	INFO scripts.py:1033 -- [1m  ray stop[22m
+2026-04-17 05:32:19,113	INFO scripts.py:1036 -- To view the status of the cluster, use
+2026-04-17 05:32:19,113	INFO scripts.py:1037 --   [1mray status[22m[26m
+2026-04-17 05:32:19,113	INFO scripts.py:1155 -- [36m[1m--block[22m[39m
+2026-04-17 05:32:19,113	INFO scripts.py:1156 -- This command will now block forever until terminated by a signal.
+2026-04-17 05:32:19,114	INFO scripts.py:1159 -- Running subprocesses are monitored and a message will be printed if any of them terminate unexpectedly. Subprocesses exit with SIGTERM will be treated as graceful, thus NOT reported.
+2026-04-17 05:32:19,114	INFO scripts.py:1164 -- Process exit logs will be saved to: [1m/tmp/ray/session_2026-04-17_05-32-17_086615_41/logs/ray_process_exit.log[22m[26m
+(APIServer pid=537) INFO 04-17 05:32:33 [utils.py:299] 
+(APIServer pid=537) INFO 04-17 05:32:33 [utils.py:299]        █     █     █▄   ▄█
+(APIServer pid=537) INFO 04-17 05:32:33 [utils.py:299]  ▄▄ ▄█ █     █     █ ▀▄▀ █  version 0.19.1rc1.dev46+gc5e3454e5.d20260406
+(APIServer pid=537) INFO 04-17 05:32:33 [utils.py:299]   █▄█▀ █     █     █     █  model   cyankiwi/MiniMax-M2.7-AWQ-4bit
+(APIServer pid=537) INFO 04-17 05:32:33 [utils.py:299]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+(APIServer pid=537) INFO 04-17 05:32:33 [utils.py:299] 
+(APIServer pid=537) INFO 04-17 05:32:33 [utils.py:233] non-default args: {'model_tag': 'cyankiwi/MiniMax-M2.7-AWQ-4bit', 'enable_auto_tool_choice': True, 'tool_call_parser': 'minimax_m2', 'host': '0.0.0.0', 'model': 'cyankiwi/MiniMax-M2.7-AWQ-4bit', 'trust_remote_code': True, 'max_model_len': 196608, 'load_format': 'fastsafetensors', 'reasoning_parser': 'minimax_m2_append_think', 'distributed_executor_backend': 'ray', 'tensor_parallel_size': 2, 'gpu_memory_utilization': 0.78, 'kv_cache_dtype': 'fp8', 'enable_prefix_caching': True, 'prefix_caching_hash_algo': 'sha256_cbor', 'max_num_batched_tokens': 16384, 'max_num_seqs': 16, 'max_num_partial_prefills': 2, 'long_prefill_token_threshold': 4096}
+(APIServer pid=537) WARNING 04-17 05:32:33 [envs.py:1783] Unknown vLLM environment variable detected: VLLM_BASE_DIR
+(APIServer pid=537) INFO 04-17 05:32:34 [model.py:554] Resolved architecture: MiniMaxM2ForCausalLM
+(APIServer pid=537) INFO 04-17 05:32:34 [model.py:1684] Using max model len 196608
+(APIServer pid=537) Traceback (most recent call last):
+(APIServer pid=537)   File "/usr/local/bin/vllm", line 10, in <module>
+(APIServer pid=537)     sys.exit(main())
+(APIServer pid=537)              ^^^^^^
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/cli/main.py", line 75, in main
+(APIServer pid=537)     args.dispatch_function(args)
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/cli/serve.py", line 122, in cmd
+(APIServer pid=537)     uvloop.run(run_server(args))
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/uvloop/__init__.py", line 96, in run
+(APIServer pid=537)     return __asyncio.run(
+(APIServer pid=537)            ^^^^^^^^^^^^^^
+(APIServer pid=537)   File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run
+(APIServer pid=537)     return runner.run(main)
+(APIServer pid=537)            ^^^^^^^^^^^^^^^^
+(APIServer pid=537)   File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run
+(APIServer pid=537)     return self._loop.run_until_complete(task)
+(APIServer pid=537)            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=537)   File "uvloop/loop.pyx", line 1518, in uvloop.loop.Loop.run_until_complete
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/uvloop/__init__.py", line 48, in wrapper
+(APIServer pid=537)     return await main
+(APIServer pid=537)            ^^^^^^^^^^
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/api_server.py", line 684, in run_server
+(APIServer pid=537)     await run_server_worker(listen_address, sock, args, **uvicorn_kwargs)
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/api_server.py", line 698, in run_server_worker
+(APIServer pid=537)     async with build_async_engine_client(
+(APIServer pid=537)   File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+(APIServer pid=537)     return await anext(self.gen)
+(APIServer pid=537)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/api_server.py", line 100, in build_async_engine_client
+(APIServer pid=537)     async with build_async_engine_client_from_engine_args(
+(APIServer pid=537)   File "/usr/lib/python3.12/contextlib.py", line 210, in __aenter__
+(APIServer pid=537)     return await anext(self.gen)
+(APIServer pid=537)            ^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/api_server.py", line 124, in build_async_engine_client_from_engine_args
+(APIServer pid=537)     vllm_config = engine_args.create_engine_config(usage_context=usage_context)
+(APIServer pid=537)                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/vllm/engine/arg_utils.py", line 1579, in create_engine_config
+(APIServer pid=537)     self._check_feature_supported()
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/vllm/engine/arg_utils.py", line 2047, in _check_feature_supported
+(APIServer pid=537)     _raise_unsupported_error(feature_name="Concurrent Partial Prefill")
+(APIServer pid=537)   File "/usr/local/lib/python3.12/dist-packages/vllm/engine/arg_utils.py", line 2326, in _raise_unsupported_error
+(APIServer pid=537)     raise NotImplementedError(msg)
+(APIServer pid=537) NotImplementedError: Concurrent Partial Prefill is not supported. We recommend to remove Concurrent Partial Prefill from your config.
+
+---STDERR---

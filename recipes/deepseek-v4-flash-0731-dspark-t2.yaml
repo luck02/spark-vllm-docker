@@ -47,7 +47,7 @@ defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 2
-  gpu_memory_utilization: 0.78
+  gpu_memory_utilization: 0.85   # T2: the full #304 package needs headroom for autotune+capture workspace; 0.78 leaves only 9.85 GiB KV (<262K need). #304's 0731 sweep validated 0.85 @ 262K = 18.15 GiB pool on this stack
   max_model_len: 262144
   block_size: 256
   max_num_seqs: 4

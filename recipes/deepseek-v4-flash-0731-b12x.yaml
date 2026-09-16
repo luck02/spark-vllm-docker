@@ -4,6 +4,8 @@
 # Validated: 1,048,576 ctx (auto), 53.8 t/s single-stream @ 51.3% acceptance,
 # 3/3 needles @ 950,482 tok. See bench-results/dsv4-0731-ctx-ladder/JOURNAL.md.
 # Rollback: run-recipe.sh deepseek-v4-flash-0731-dspark -d (262k/0.85, vllm-node:latest)
+# Keep --enable-prompt-tokens-details: without it vLLM sends no prompt_tokens_details
+# at all, and switchyard-server logs cached_tokens: 0 (lab decision 2026-09-15).
 
 recipe_version: "1"
 name: DeepSeek-V4-Flash-0731
@@ -62,6 +64,7 @@ command: |
       --max-num-batched-tokens {max_num_batched_tokens} \
       --gpu-memory-utilization {gpu_memory_utilization} \
       --enable-prefix-caching \
+      --enable-prompt-tokens-details \
       --tokenizer-mode deepseek_v4 \
       --tool-call-parser deepseek_v4 \
       --enable-auto-tool-choice \

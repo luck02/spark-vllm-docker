@@ -75,6 +75,7 @@ command: |
       --max-num-batched-tokens {max_num_batched_tokens} \
       --gpu-memory-utilization {gpu_memory_utilization} \
       --enable-prefix-caching \
+      --enable-prompt-tokens-details \
       --enable-chunked-prefill \
       --enable-flashinfer-autotune \
       --attention-backend FLASHINFER_MLA_SPARSE_DSV4 \

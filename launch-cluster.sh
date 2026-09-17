@@ -1103,7 +1103,7 @@ start_cluster() {
         done
     fi
 
-    local docker_args_common="--gpus all -d --rm $docker_network_args --name $CONTAINER_NAME $docker_entrypoint_args $DOCKER_ARGS $IMAGE_NAME"
+    local docker_args_common="--gpus all -d $docker_network_args --name $CONTAINER_NAME $docker_entrypoint_args $DOCKER_ARGS $IMAGE_NAME"
     local docker_caps_args=""
     local docker_resource_args=""
 
@@ -1117,6 +1117,16 @@ start_cluster() {
     fi
     local keepalive_cmd
     keepalive_cmd="$(container_keepalive_command)"
+
+    # Containers run without --rm so their logs survive a crash or a stop. Before
+    # reusing the name, rename the previous container to <name>-<created time>
+    # instead of deleting it. Read one with: docker logs vllm_node-20260916T044326Z
+    # Remove old ones by hand: docker ps -a --filter name=vllm_node-
+    local keep_previous_cmd="if docker container inspect $CONTAINER_NAME >/dev/null 2>&1; then kept=$CONTAINER_NAME-\$(docker container inspect -f '{{.Created}}' $CONTAINER_NAME | cut -c1-19 | tr -d ':-')Z; docker rename $CONTAINER_NAME \$kept && echo \"Kept previous container as \$kept\"; fi"
+    bash -c "$keep_previous_cmd" || { echo "Error: could not rename the previous $CONTAINER_NAME on $HEAD_IP"; exit 1; }
+    for worker in "${PEER_NODES[@]}"; do
+        ssh "$worker" "$keep_previous_cmd" || { echo "Error: could not rename the previous $CONTAINER_NAME on $worker"; exit 1; }
+    done
 
     # Start Head Node
     echo "Starting Head Node on $HEAD_IP..."

@@ -32,7 +32,14 @@ defaults:
   host: 0.0.0.0
   tensor_parallel: 2
   gpu_memory_utilization: 0.85
-  max_model_len: auto
+  # 262144, not auto. Vision-Exp weights take 81.2 GiB per node, which leaves
+  # 7.31 GiB for KV at util 0.85. On `auto` vLLM shrinks max_model_len to fit
+  # (293,888 on 2026-09-16) and then fails capturing CUDA graphs:
+  # "assert active_topk_width >= cm.max_seq_len // self.compress_ratio"
+  # (vllm/models/deepseek_v4/sparse_mla.py:262). The C128A topk buffers get
+  # sized from the shrunken length while the capture still uses the pre-shrink
+  # 1M, so the engine never starts. A pinned length that fits skips auto-fit.
+  max_model_len: 262144
   block_size: 256
   max_num_seqs: 8
   max_num_batched_tokens: 8192

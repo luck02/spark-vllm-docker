@@ -31,7 +31,9 @@ defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 2
-  gpu_memory_utilization: 0.85
+  # 0.86 is the measured Spark ceiling (0.87+ cannot boot — ai_monitor_control
+  # docs/decisions.md 2026-08-06). Upstream's recipe shipped 0.85.
+  gpu_memory_utilization: 0.86
   # 262144, not auto. Vision-Exp weights take 81.2 GiB per node, which leaves
   # 7.31 GiB for KV at util 0.85. On `auto` vLLM shrinks max_model_len to fit
   # (293,888 on 2026-09-16) and then fails capturing CUDA graphs:

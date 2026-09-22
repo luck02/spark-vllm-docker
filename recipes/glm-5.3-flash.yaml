@@ -39,6 +39,15 @@ defaults:
   gpu_memory_utilization: 0.85
 
 env:
+  # The NAS downloader (ai_monitor_control nas/hf-downloader/download.sh) sets
+  # HF_HOME, so models land in the hub/ subdirectory. The Sparks symlink
+  # ~/.cache/huggingface/hub at /mnt/nas/models/huggingface, one level above
+  # that, so HF does not find this model and silently starts pulling all 166 GB
+  # from the internet instead (seen 2026-09-22: 12 GB of stalled XET blobs).
+  # Point the cache at the layout the file actually uses, and refuse to reach
+  # the network at all so a miss fails fast instead of downloading.
+  HF_HUB_CACHE: "/mnt/nas/models/huggingface/hub"
+  HF_HUB_OFFLINE: "1"
   CUTE_DSL_ARCH: "sm_121a"
   SAFETENSORS_FAST_GPU: "1"
   VLLM_ENABLE_ROCE_ALLREDUCE: "1"

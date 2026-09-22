@@ -1,12 +1,27 @@
 .env
+.env-*
 build-metadata.yaml
 .DS_STORE
 
-# Build artifacts — wheels are produced by the build, not sources
-wheels/*.whl
+# Python bytecode and tool caches
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+.wheel-cache/
+mods/draft
+recipes/backups
+recipes/draft
+tests/draft
+benchmark-plots
+backup-wheels
+.codex
+wheels
+
+# local additions
 wheels/.flashinfer-commit
 wheels/.vllm-commit
-
-# Python bytecode / caches
 __pycache__/
 *.pyc

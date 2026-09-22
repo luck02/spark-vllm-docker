@@ -1,5 +1,8 @@
 # Recipe: GLM-5.3-Flash-NVFP4-Spark
 # GLM 5.3 Flash using the B12X-optimized serving stack on a dual DGX Spark cluster
+# Local change: --enable-prompt-tokens-details, so usage.prompt_tokens_details
+# records cache hits (ai_monitor_control docs/decisions.md 2026-09-15). The flag
+# only takes effect at model start.
 
 recipe_version: "1"
 name: GLM-5.3-Flash-NVFP4-Spark
@@ -56,6 +59,7 @@ command: |
     --decode-context-parallel-size {decode_context_parallel} \
     --mamba-cache-mode align \
     --enable-prefix-caching \
+    --enable-prompt-tokens-details \
     --enable-chunked-prefill \
     --dtype bfloat16 \
     --kv-cache-dtype fp8 \

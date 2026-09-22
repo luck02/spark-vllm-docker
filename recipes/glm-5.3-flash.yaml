@@ -32,14 +32,16 @@ defaults:
   # 2048, not 4096: the OOM kill at util 0.85 happened on the first prompt
   # with a ~2000-token prefill, and this caps the per-step prefill spike.
   max_num_batched_tokens: 2048
-  # 7, not upstream's 5. Measured 2026-09-22: the step rate sits at ~10.3
-  # steps/s and does not move when acceptance does (2.71 tok/step at temp 1.0
-  # vs 2.90 greedy vs 3.11 at 8k context all ran at 10.1-10.35 steps/s), so
-  # the target forward dominates a step and extra draft positions are close to
-  # free. Draft position 4 was still accepted 21.4% of the time, so there is
-  # room above 5. Decode batch is max_num_seqs x (k+1) = 32, still inside the
-  # cudagraph capture sizes, which top out at 48.
-  num_speculative_tokens: 7
+  # 5. Tried 7 on 2026-09-22 and it was 12% slower: 24.5 tok/s against 28.0 at
+  # the same sampling, because the step rate fell from 10.27 to 8.89 steps/s
+  # while tokens per step barely moved (2.74 against 2.71). Two extra draft
+  # positions cost ~15 ms of a ~97 ms step, so an MTP draft forward is ~7.5 ms
+  # -- about an eighth of the ~60 ms base step, not the 1/45 its single layer
+  # would suggest. It is a MoE layer with its own sampling pass and its own
+  # cross-node all-reduce, and at batch 1 that is latency, not arithmetic.
+  # Working back from the measured per-position acceptance, k=3 and k=4 both
+  # land within ~2% of k=5, so there is nothing to win either way. 5 stays.
+  num_speculative_tokens: 5
   # Defined by upstream but deliberately NOT passed. --kv-cache-memory-bytes
   # makes vLLM skip memory profiling altogether -- it logs "does not respect
   # the gpu_memory_utilization config" -- so nothing bounds total use and the
@@ -76,12 +78,19 @@ env:
   CUTE_DSL_ARCH: "sm_121a"
   SAFETENSORS_FAST_GPU: "1"
   VLLM_ENABLE_ROCE_ALLREDUCE: "1"
-  # 32MB, not upstream's 2MB. A prefill chunk all-reduce is
-  # max_num_batched_tokens x hidden_size x 2 bytes = 2048 x 4096 x 2 = 16.8 MB,
-  # 45 times per chunk. Above the threshold RoCEnante hands off to NCCL, and
-  # NCCL_IB_DISABLE=1 below has NCCL on TCP sockets, so every prefill collective
-  # was leaving the RDMA path. Decode is unaffected either way: 6-32 tokens per
-  # step is 48-262 KB. The all-gather cap next door is already 16 MB.
+  # 32MB, not upstream's 2MB. Worth +85% on prefill, measured both ways on
+  # 2026-09-22 with scripts/bench-glm-5.3-flash-prefill.py in ai_monitor_control:
+  # 1036 prompt tok/s at 2MB against 1914 at 32MB on a 88k unique prompt, and
+  # the same ratio at 12k and 48k.
+  #
+  # A prefill chunk all-reduces max_num_batched_tokens x hidden_size x 2 bytes
+  # = 2048 x 4096 x 2 = 16 MiB, 45 times per chunk. That is over the 2MB cap,
+  # so RoCEnante handed every one of them to NCCL -- and NCCL_IB_DISABLE=1
+  # below has NCCL on TCP sockets, not RDMA. Raising the cap keeps prefill on
+  # the RDMA path. Decode was never affected: 6 tokens per step is 48 KB.
+  #
+  # Re-check this if NCCL_IB_DISABLE goes away, since that changes what the
+  # fallback costs.
   VLLM_ROCE_ALLREDUCE_MAX_SIZE: "32MB"
   VLLM_WORKER_MULTIPROC_METHOD: "spawn"
   VLLM_SSM_CONV_STATE_LAYOUT: "DS"

@@ -25,10 +25,19 @@ defaults:
   pipeline_parallel: 1
   decode_context_parallel: 1
   block_size: 256
-  max_model_len: 500000
+  # 131072, not upstream's 500000. The attention workspace scales with this,
+  # and the profiled activation peak is what leaves no room for KV.
+  max_model_len: 131072
   max_num_seqs: 4
-  max_num_batched_tokens: 4096
+  # 2048, not 4096: the OOM kill at util 0.85 happened on the first prompt
+  # with a ~2000-token prefill, and this caps the per-step prefill spike.
+  max_num_batched_tokens: 2048
   num_speculative_tokens: 5
+  # Defined by upstream but deliberately NOT passed. --kv-cache-memory-bytes
+  # makes vLLM skip memory profiling altogether -- it logs "does not respect
+  # the gpu_memory_utilization config" -- so nothing bounds total use and the
+  # Linux OOM killer took the worker during KV allocation (2026-09-22).
+  # On unified memory the budget has to come from util, not from this.
   kv_cache_memory_bytes: 8G
   # 0.85, not upstream's 0.87. vLLM checks free memory at startup and our
   # nodes read 104.49 of 121.63 GiB free with caches dropped, so 0.87 (105.81
@@ -36,7 +45,7 @@ defaults:
   # (ai_monitor_control docs/decisions.md 2026-08-06). Costs nothing here:
   # weights are ~77 GiB per node, so 0.85 still leaves ~26 GiB for KV, well
   # over the 8 GiB upstream was targeting.
-  gpu_memory_utilization: 0.85
+  gpu_memory_utilization: 0.84
 
 env:
   # The NAS downloader (ai_monitor_control nas/hf-downloader/download.sh) sets
@@ -47,6 +56,15 @@ env:
   # Point the cache at the layout the file actually uses, and refuse to reach
   # the network at all so a miss fails fast instead of downloading.
   HF_HUB_CACHE: "/mnt/nas/models/huggingface/hub"
+  # NCCL cannot register memory on these HCAs: ibv_reg_mr_iova2 returns
+  # ENOMEM and NCCL reports "unhandled system error", intermittently, during
+  # the very first communicator. It is not the channel count (16 fails the
+  # same as 64), not the memlock limit (unlimited fails the same as 8 MB),
+  # not dmabuf (NCCL_DMABUF_ENABLE=0 fails the same), and nvidia_peermem
+  # will not insert on GB10 at all. Sockets over the same CX-7 link work.
+  # b12x RoCEnante still does the hot TP all-reduce over RDMA, so this only
+  # moves NCCL's own traffic. Remove once the registration path is fixed.
+  NCCL_IB_DISABLE: "1"
   HF_HUB_OFFLINE: "1"
   CUTE_DSL_ARCH: "sm_121a"
   SAFETENSORS_FAST_GPU: "1"

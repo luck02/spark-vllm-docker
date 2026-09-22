@@ -30,7 +30,13 @@ defaults:
   max_num_batched_tokens: 4096
   num_speculative_tokens: 5
   kv_cache_memory_bytes: 8G
-  gpu_memory_utilization: 0.87
+  # 0.85, not upstream's 0.87. vLLM checks free memory at startup and our
+  # nodes read 104.49 of 121.63 GiB free with caches dropped, so 0.87 (105.81
+  # GiB) aborts before any weight loads. Measured ceiling is ~0.859
+  # (ai_monitor_control docs/decisions.md 2026-08-06). Costs nothing here:
+  # weights are ~77 GiB per node, so 0.85 still leaves ~26 GiB for KV, well
+  # over the 8 GiB upstream was targeting.
+  gpu_memory_utilization: 0.85
 
 env:
   CUTE_DSL_ARCH: "sm_121a"

@@ -1,8 +1,5 @@
 # Recipe: GLM-5.3-Flash-NVFP4-Spark
 # GLM 5.3 Flash using the B12X-optimized serving stack on a dual DGX Spark cluster
-# Local change: --enable-prompt-tokens-details, so usage.prompt_tokens_details
-# records cache hits (ai_monitor_control docs/decisions.md 2026-09-15). The flag
-# only takes effect at model start.
 
 recipe_version: "1"
 name: GLM-5.3-Flash-NVFP4-Spark
@@ -25,73 +22,18 @@ defaults:
   pipeline_parallel: 1
   decode_context_parallel: 1
   block_size: 256
-  # 131072, not upstream's 500000. The attention workspace scales with this,
-  # and the profiled activation peak is what leaves no room for KV.
-  max_model_len: 131072
+  max_model_len: 500000
   max_num_seqs: 4
-  # 2048, not 4096: the OOM kill at util 0.85 happened on the first prompt
-  # with a ~2000-token prefill, and this caps the per-step prefill spike.
-  max_num_batched_tokens: 2048
-  # 5. Tried 7 on 2026-09-22 and it was 12% slower: 24.5 tok/s against 28.0 at
-  # the same sampling, because the step rate fell from 10.27 to 8.89 steps/s
-  # while tokens per step barely moved (2.74 against 2.71). Two extra draft
-  # positions cost ~15 ms of a ~97 ms step, so an MTP draft forward is ~7.5 ms
-  # -- about an eighth of the ~60 ms base step, not the 1/45 its single layer
-  # would suggest. It is a MoE layer with its own sampling pass and its own
-  # cross-node all-reduce, and at batch 1 that is latency, not arithmetic.
-  # Working back from the measured per-position acceptance, k=3 and k=4 both
-  # land within ~2% of k=5, so there is nothing to win either way. 5 stays.
+  max_num_batched_tokens: 4096
   num_speculative_tokens: 5
-  # Defined by upstream but deliberately NOT passed. --kv-cache-memory-bytes
-  # makes vLLM skip memory profiling altogether -- it logs "does not respect
-  # the gpu_memory_utilization config" -- so nothing bounds total use and the
-  # Linux OOM killer took the worker during KV allocation (2026-09-22).
-  # On unified memory the budget has to come from util, not from this.
   kv_cache_memory_bytes: 8G
-  # 0.85, not upstream's 0.87. vLLM checks free memory at startup and our
-  # nodes read 104.49 of 121.63 GiB free with caches dropped, so 0.87 (105.81
-  # GiB) aborts before any weight loads. Measured ceiling is ~0.859
-  # (ai_monitor_control docs/decisions.md 2026-08-06). Costs nothing here:
-  # weights are ~77 GiB per node, so 0.85 still leaves ~26 GiB for KV, well
-  # over the 8 GiB upstream was targeting.
-  gpu_memory_utilization: 0.84
+  gpu_memory_utilization: 0.87
 
 env:
-  # The NAS downloader (ai_monitor_control nas/hf-downloader/download.sh) sets
-  # HF_HOME, so models land in the hub/ subdirectory. The Sparks symlink
-  # ~/.cache/huggingface/hub at /mnt/nas/models/huggingface, one level above
-  # that, so HF does not find this model and silently starts pulling all 166 GB
-  # from the internet instead (seen 2026-09-22: 12 GB of stalled XET blobs).
-  # Point the cache at the layout the file actually uses, and refuse to reach
-  # the network at all so a miss fails fast instead of downloading.
-  HF_HUB_CACHE: "/mnt/nas/models/huggingface/hub"
-  # NCCL cannot register memory on these HCAs: ibv_reg_mr_iova2 returns
-  # ENOMEM and NCCL reports "unhandled system error", intermittently, during
-  # the very first communicator. It is not the channel count (16 fails the
-  # same as 64), not the memlock limit (unlimited fails the same as 8 MB),
-  # not dmabuf (NCCL_DMABUF_ENABLE=0 fails the same), and nvidia_peermem
-  # will not insert on GB10 at all. Sockets over the same CX-7 link work.
-  # b12x RoCEnante still does the hot TP all-reduce over RDMA, so this only
-  # moves NCCL's own traffic. Remove once the registration path is fixed.
-  NCCL_IB_DISABLE: "1"
-  HF_HUB_OFFLINE: "1"
   CUTE_DSL_ARCH: "sm_121a"
   SAFETENSORS_FAST_GPU: "1"
   VLLM_ENABLE_ROCE_ALLREDUCE: "1"
-  # 32MB, not upstream's 2MB. Worth +85% on prefill, measured both ways on
-  # 2026-09-22 with scripts/bench-glm-5.3-flash-prefill.py in ai_monitor_control:
-  # 1036 prompt tok/s at 2MB against 1914 at 32MB on a 88k unique prompt, and
-  # the same ratio at 12k and 48k.
-  #
-  # A prefill chunk all-reduces max_num_batched_tokens x hidden_size x 2 bytes
-  # = 2048 x 4096 x 2 = 16 MiB, 45 times per chunk. That is over the 2MB cap,
-  # so RoCEnante handed every one of them to NCCL -- and NCCL_IB_DISABLE=1
-  # below has NCCL on TCP sockets, not RDMA. Raising the cap keeps prefill on
-  # the RDMA path. Decode was never affected: 6 tokens per step is 48 KB.
-  #
-  # Re-check this if NCCL_IB_DISABLE goes away, since that changes what the
-  # fallback costs.
-  VLLM_ROCE_ALLREDUCE_MAX_SIZE: "32MB"
+  VLLM_ROCE_ALLREDUCE_MAX_SIZE: "2MB"
   VLLM_WORKER_MULTIPROC_METHOD: "spawn"
   VLLM_SSM_CONV_STATE_LAYOUT: "DS"
   VLLM_USE_AOT_COMPILE: "1"
@@ -114,7 +56,6 @@ command: |
     --decode-context-parallel-size {decode_context_parallel} \
     --mamba-cache-mode align \
     --enable-prefix-caching \
-    --enable-prompt-tokens-details \
     --enable-chunked-prefill \
     --dtype bfloat16 \
     --kv-cache-dtype fp8 \

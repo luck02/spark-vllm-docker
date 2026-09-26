@@ -22,12 +22,24 @@ defaults:
   pipeline_parallel: 1
   decode_context_parallel: 1
   block_size: 256
-  max_model_len: 500000
+  # Local changes from upstream (2026-09-25), which ships 500000 / 0.87 and
+  # leaves kv_cache_memory_bytes out of the command:
+  # - 0.87 fails vLLM's startup free-memory check on our Sparks. It needs
+  #   105.81 GiB free and the best we have seen is 105.17, right after a
+  #   reboot. 0.85 passes (needs 103.38).
+  # - At 0.85 with 4096 batched tokens, the automatic KV cache is 4.32 GiB,
+  #   too small for 500000. So the cache is fixed at 4.8 GiB (5153960755
+  #   bytes) and max_model_len is 262144: 422,484 tokens of cache, 1.61 full
+  #   262144-token requests at once. With the cache fixed,
+  #   gpu_memory_utilization only sets the bar for the startup check.
+  # - About 3.3 GiB stays free on spark1 once serving. A larger cache risks
+  #   the out-of-memory kill seen during b12x warm-up at 0.855.
+  max_model_len: 262144
   max_num_seqs: 4
   max_num_batched_tokens: 4096
   num_speculative_tokens: 5
-  kv_cache_memory_bytes: 8G
-  gpu_memory_utilization: 0.87
+  kv_cache_memory_bytes: 5153960755
+  gpu_memory_utilization: 0.85
 
 env:
   CUTE_DSL_ARCH: "sm_121a"
@@ -73,4 +85,5 @@ command: |
     --reasoning-parser glm45 \
     --tool-call-parser glm47 \
     --enable-auto-tool-choice \
+    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
     --gpu-memory-utilization {gpu_memory_utilization}
